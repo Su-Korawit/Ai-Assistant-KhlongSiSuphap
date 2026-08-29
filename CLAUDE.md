@@ -45,6 +45,42 @@ these three files, not duplicated into `App.jsx` or the API handler.
   `{ complete, valid, score, errors, warnings, checks }`. This is the sole
   authority on correctness; the AI never overrides it.
 
+### Irregular Thai spellings — dictionary vs. scanner rule
+
+Three fixes layered onto `thaiSyllable.js` for spellings the general scanner
+gets wrong, using two different mechanisms depending on *why* they're wrong:
+
+- **`irregularSyllables.js`** — a lexical exception dictionary (ไซร้, จริง,
+  ทราย, ทราบ, แทรก, ทรง, ทรวง, ทรุด, โทรม), consulted first in both
+  `splitThaiSyllables` (longest-match at the current scan position) and
+  `analyzeSyllable` (exact match on the whole syllable). These are silent-ร
+  spellings (ร with no การันต์ mark, or the ทร→ซ pronunciation shift) where
+  *which words are affected can't be derived from the spelling itself* —
+  จริง has a silent ร but จรัส/จรวด don't, so a general "ร after this
+  consonant is silent" rule would break those. `isEk`/`isTho`/`isDeadWord`
+  deliberately do **not** consult this dictionary: they key off the last
+  literal consonant / literal tone mark, which a silent *medial* ร never
+  disturbs, so they already give the right answer unassisted.
+- **ร หัน (รร ซ้อน) handling** — inline in `splitThaiSyllables`, checked
+  immediately after the onset consonant, before the CLUSTERS/ห-นำ pair
+  check (a real CLUSTERS entry like `'กร'` would otherwise swallow the
+  first ร of "กรรม" as a cluster). Not in the dictionary: this is a genuine
+  orthographic rule that applies uniformly to *any* onset (กรรม, ธรรม,
+  สรรพ, บรรจุ all follow the same ะ+final / implicit-ัน branching), so it's
+  cheaper and more correct as scanner logic than as one dictionary entry
+  per รร-word.
+- **ไ/ใ normalization** — one line in `analyzeSyllable`'s `vowelSkeleton`
+  computation (`.replace(/ใ/g, 'ไ')`). ไม้มลาย and ไม้ม้วน are always the
+  same sound in modern Thai with no exceptions, so this is an
+  unconditional normalize, not a dictionary lookup.
+
+**The rule for next time:** if whether a spelling is irregular depends on
+*which word it is* (some ร-after-X words are silent, some aren't) →
+dictionary entry in `irregularSyllables.js`. If it's a *pattern that always
+applies regardless of the specific word* → scanner/normalize logic. ฤ/ฤๅ
+(ฤทธิ์=ริด, ฤกษ์=เริก, พฤกษ์=พรึก — each word reads differently) are the
+next known case and are word-specific → dictionary, not a rule.
+
 ### `api/generate-klong.js` — dev/prod parity
 
 Written against raw Node `req`/`res` (not Vercel-specific helpers), so the
