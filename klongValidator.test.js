@@ -94,4 +94,50 @@ describe('validateKlong — rhyme', () => {
     const result = validateKlong(partial);
     expect(result.errors.some(e => e.code === 'RHYME_FAIL')).toBe(false);
   });
+
+  it('flags a broken rhyme through a compound-vowel word (regression: เอีย glide bug)', () => {
+    const bad = clone(VALID_POEM);
+    bad[1][4] = 'เพียง'; // บาท2 คำ5 — single syllable, but genuinely doesn't rhyme with อา here
+    const result = validateKlong(bad);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.code === 'RHYME_FAIL')).toBe(true);
+    expect(result.errors.some(e => e.code === 'MULTI_SYLLABLE')).toBe(false); // เพียง must not be misread as 2 syllables
+  });
+
+  it('does not falsely break a rhyme group of genuinely-rhyming compound-vowel (เอีย) words', () => {
+    const good = clone(VALID_POEM);
+    good[0][6] = 'เพียง'; // บาท1 คำ7
+    good[1][4] = 'เคียง'; // บาท2 คำ5
+    good[2][4] = 'เสียง'; // บาท3 คำ5
+    const result = validateKlong(good);
+    expect(result.errors.some(e => e.code === 'RHYME_FAIL')).toBe(false);
+    expect(result.errors.some(e => e.code === 'MULTI_SYLLABLE')).toBe(false);
+  });
+
+  it('does not falsely flag สระออ words (ทอง/ห้อง) as MULTI_SYLLABLE or a broken rhyme', () => {
+    const good = clone(VALID_POEM);
+    good[0][6] = 'ทอง'; // บาท1 คำ7
+    good[1][4] = 'ห้อง'; // บาท2 คำ5
+    good[2][4] = 'สอง'; // บาท3 คำ5
+    const result = validateKlong(good);
+    expect(result.errors.some(e => e.code === 'RHYME_FAIL')).toBe(false);
+    expect(result.errors.some(e => e.code === 'MULTI_SYLLABLE')).toBe(false);
+  });
+});
+
+describe('validateKlong — single-syllable-per-slot', () => {
+  it('flags a slot whose word splits into more than one Thai syllable', () => {
+    const bad = clone(VALID_POEM);
+    bad[1][0] = 'ปฐพี'; // บาท2 คำ1 — real word, but 2 syllables, not a valid slot filler
+    const result = validateKlong(bad);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.code === 'MULTI_SYLLABLE' && e.baht === 1 && e.pos === 1)).toBe(true);
+  });
+
+  it('does not flag non-Thai placeholder text as multi-syllable (unparseable, not wrong)', () => {
+    const uncertain = clone(VALID_POEM);
+    uncertain[2][4] = 'x1';
+    const result = validateKlong(uncertain);
+    expect(result.errors.some(e => e.code === 'MULTI_SYLLABLE')).toBe(false);
+  });
 });

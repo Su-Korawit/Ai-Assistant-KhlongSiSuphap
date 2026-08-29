@@ -1,5 +1,5 @@
 import { validateKlong } from '../klongValidator.js';
-import { BAHT_SCHEME, RHYME_GROUPS } from '../klongRules.js';
+import { BAHT_SCHEME, RHYME_GROUPS, MIN_ACCEPTABLE_SCORE } from '../klongRules.js';
 
 // Written against raw Node http req/res (not Vercel-specific helpers) so the
 // exact same handler runs under Vercel's Node runtime in production AND
@@ -78,10 +78,15 @@ async function callGemini(apiKey, prompt) {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             responseMimeType: 'application/json',
-            // Structural/tonal/rhyme correctness is enforced deterministically
-            // by validateKlong, not by the model — so spending time on
-            // extended reasoning here only adds latency, not reliability.
-            thinkingConfig: { thinkingBudget: 0 },
+            // Structural/tonal/rhyme correctness is still enforced
+            // deterministically by validateKlong, never by the model — but
+            // measured data showed thinkingBudget 0 wasn't reliable enough:
+            // avg best-of-3 score was only 61.7 (frequently below
+            // MIN_ACCEPTABLE_SCORE), worst-case total latency 6.1s. Budget
+            // 2048 measured avg score 79.3, worst-case total 25.8s — still
+            // well under Vercel's 60s cap. Re-measure if you revisit this;
+            // don't assume these numbers hold across model versions.
+            thinkingConfig: { thinkingBudget: 2048 },
           },
         }),
       });
@@ -125,6 +130,12 @@ async function readJsonBody(req) {
  * Generate → validate → (if invalid) send targeted feedback → regenerate,
  * up to MAX_REFINE_ATTEMPTS. Always returns the best-scoring attempt seen,
  * never loops unbounded (Section 15).
+ *
+ * `meetsThreshold` tells the caller whether that best attempt is good
+ * enough to present as a finished poem (score >= MIN_ACCEPTABLE_SCORE) —
+ * the attempt and its validation are still returned either way, so the
+ * caller can show the user how close it got rather than just a bare
+ * failure (Rule 3: the AI never overrides validateKlong's verdict).
  */
 export async function generateKlong(topic, apiKey) {
   let best = null;
@@ -142,7 +153,8 @@ export async function generateKlong(topic, apiKey) {
     baht = await callGemini(apiKey, buildRefinePrompt(topic, baht, validation.errors));
   }
 
-  return { baht: best.baht, validation: best.validation, attempts };
+  const meetsThreshold = (best.validation.score ?? 0) >= MIN_ACCEPTABLE_SCORE;
+  return { baht: best.baht, validation: best.validation, attempts, meetsThreshold };
 }
 
 export default async function handler(req, res) {

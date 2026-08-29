@@ -1,7 +1,13 @@
-import { isEk, isTho, compareRhyme, RhymeConfidence } from './thaiSyllable.js';
+import { isEk, isTho, compareRhyme, RhymeConfidence, countThaiSyllables } from './thaiSyllable.js';
 import { BAHT_SCHEME, RHYME_GROUPS } from './klongRules.js';
 
 const CONFIDENCE_ORDER = { EXACT: 0, LIKELY: 1, UNCERTAIN: 2, NO_MATCH: 3 };
+
+// Only pure Thai-script words can be confidently syllable-counted — a word
+// containing digits/Latin/punctuation (e.g. a test placeholder) isn't Thai
+// text to begin with, so it's skipped rather than flagged (same
+// never-hard-fail-on-unparseable-input rule compareRhyme follows).
+const THAI_ONLY_RE = /^[ก-ฮเแโใไะ-๋]+$/;
 
 /**
  * validateKlong(words)
@@ -37,6 +43,13 @@ export function validateKlong(words) {
       const word = (row[i] || '').trim();
       totalSlots++;
       if (word) filledSlots++;
+
+      if (word && THAI_ONLY_RE.test(word) && countThaiSyllables(word) > 1) {
+        errors.push({
+          code: 'MULTI_SYLLABLE', baht: b, pos, word, severity: 'error',
+          message: `${baht.label} คำที่ ${pos} ("${word}") มีมากกว่า 1 พยางค์ ต้องใช้คำพยางค์เดียวเท่านั้น`,
+        });
+      }
 
       const isEkPos = baht.ek.includes(pos);
       const isThoPos = baht.tho.includes(pos);

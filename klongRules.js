@@ -27,3 +27,11 @@ export const RHYME_GROUPS = [
 ];
 
 export const TOTAL_WORDS = BAHT_SCHEME.reduce((sum, b) => sum + b.wordCount, 0); // 30
+
+// Below this, generateKlong() must not present its best attempt as a
+// finished poem — see api/generate-klong.js's meetsThreshold. Chosen
+// alongside raising thinkingConfig.thinkingBudget to 2048: measured
+// avg best-of-3 score was 61.7 at thinkingBudget 0 (would fail this often)
+// vs 79.3 at 2048 (clears it comfortably). Re-measure before changing
+// either value independently — they were tuned together.
+export const MIN_ACCEPTABLE_SCORE = 70;

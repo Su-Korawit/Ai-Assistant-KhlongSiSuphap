@@ -94,14 +94,16 @@ if invalid, send it the specific errors and ask it to fix just those →
 repeat up to `MAX_REFINE_ATTEMPTS` → return the best-scoring attempt seen
 (never returns nothing, never loops unbounded).
 
-`thinkingConfig.thinkingBudget` is deliberately set to `0`. Default
-thinking on gemini-2.5-flash measured ~45-90s per call in testing, which
-risks exceeding Vercel's function timeout (60s max on Hobby,
-`maxDuration: 60` is set as a safety margin) well before a multi-attempt
-refinement loop finishes. With thinking disabled, calls run ~3-8s; the
-refinement loop and `validateKlong` compensate for the resulting lower
-single-shot quality. If you revisit this tradeoff, re-measure — don't
-assume either latency or quality numbers still hold across model versions.
+`thinkingConfig.thinkingBudget` is set to `2048`, not `0`. `0` was tried
+first (calls run ~3-8s) but measured avg best-of-3 score was only 61.7 —
+frequently below `MIN_ACCEPTABLE_SCORE` (`klongRules.js`). Budget `2048`
+measures avg score 79.3, worst-case total latency 25.8s — still comfortably
+under Vercel's 60s cap (Hobby plan max, `maxDuration: 60` is set as a
+safety margin). `MIN_ACCEPTABLE_SCORE` and `thinkingBudget` were tuned
+together — `generateKlong`'s `meetsThreshold` flag (whether the best
+attempt is good enough to present as finished, still returned either way
+per Rule 3) depends on both. Re-measure both if you revisit this tradeoff —
+don't assume the numbers hold across model versions.
 
 ### Environment variable — the one landmine
 
