@@ -336,7 +336,10 @@ export const analyzeSyllable = (syllable) => {
     }
   }
 
-  const vowelSkeleton = core.replace(/[ก-ฮ]/g, '').replace(/[่-๋]/g, '');
+  // ไม้ม้วน (ใ) and ไม้มลาย (ไ) are always the same sound in modern Thai —
+  // normalize to one codepoint so words spelled with either variant can
+  // still rhyme against each other.
+  const vowelSkeleton = core.replace(/[ก-ฮ]/g, '').replace(/[่-๋]/g, '').replace(/ใ/g, 'ไ');
   if (!vowelSkeleton && !hasLeadingVowel) {
     return { ok: false }; // no recoverable vowel signal
   }

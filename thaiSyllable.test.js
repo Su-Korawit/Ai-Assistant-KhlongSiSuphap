@@ -258,3 +258,18 @@ describe('ร หัน (รร ซ้อน)', () => {
     expect(splitThaiSyllables('กราบ')).toEqual(['กราบ']);
   });
 });
+
+describe('ไม้มลาย (ไ) vs ไม้ม้วน (ใ) — always the same sound, must not affect rhyme', () => {
+  it('analyzeSyllable normalizes ใ to the same vowelSkeleton as ไ', () => {
+    expect(analyzeSyllable('ใช้').vowelSkeleton).toBe(analyzeSyllable('ไป').vowelSkeleton);
+  });
+
+  it('compareRhyme: ไ-spelled and ใ-spelled syllables rhyme normally', () => {
+    expect(compareRhyme('ไซร้', 'ใช้')).toBe(RhymeConfidence.EXACT);
+    expect(compareRhyme('ใหม่', 'ไป')).toBe(RhymeConfidence.EXACT);
+  });
+
+  it('regression: ไ/ใ words still correctly mismatch a genuinely different vowel', () => {
+    expect(compareRhyme('ไป', 'มา')).toBe(RhymeConfidence.NO_MATCH);
+  });
+});
