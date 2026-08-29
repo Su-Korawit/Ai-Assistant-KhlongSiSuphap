@@ -5,6 +5,8 @@
  * pipeline (api/generate-klong.js), so both use one validator, never two.
  */
 
+import { IRREGULAR_SYLLABLES, matchIrregularSyllable } from './irregularSyllables.js';
+
 // Real Thai consonant clusters (อักษรควบ) — second consonant shares the
 // syllable's onset, no vowel between them.
 const CLUSTERS = new Set([
@@ -15,7 +17,9 @@ const CLUSTERS = new Set([
 // ห-นำ (leading ห): ห silences/retones the following sonorant, which then
 // carries the syllable's own vowel — e.g. ไหล, หมา, เหลือ. Also treated as
 // a same-syllable pair for splitting purposes.
-const HNAM = new Set(['หง','หญ','หน','หม','หย','หร','หล','หว']);
+// 'อย' behaves like a ห-นำ pair for this closed set of modern words (อยู่,
+// อยาก, อย่าง, อย่า) — อ is silent/modifying, ย carries the syllable's vowel.
+const HNAM = new Set(['หง','หญ','หน','หม','หย','หร','หล','หว','อย']);
 
 const isConsonant = (ch) => ch !== undefined && ch >= 'ก' && ch <= 'ฮ';
 const LEADING_VOWELS = new Set(['เ','แ','โ','ใ','ไ']);
@@ -41,6 +45,16 @@ const TRAILING_VOWELS = new Set(['ะ','า','ำ']);
  * trailing consonant (e.g. "รมย์"). Rare in practice; flagged rather than
  * solved with a dictionary, which is out of scope for a heuristic
  * segmenter.
+ *
+ * Compound-vowel glides: เอีย (เพียง, เสีย), เอือ (เรือน, เดือน), อัว/ว-ลาก
+ * (ตัว, กลัว, and the reduced spelling with no ั written at all — ห่วง,
+ * ล่วง), and ออ (ทอง, ต้อง, กอ) all use a letter that reads as a plain
+ * consonant (ย, ว, or อ) but is actually part of the vowel. Handled below
+ * by checking what vowel was already consumed before that letter: a
+ * genuine final ว/อ (แมว, ดาว; อ่อน's onset อ) only occurs after a leading
+ * vowel (แ/เ/โ/ใ/ไ) or trailing vowel (ะ/า/ำ) has already been established,
+ * or — for อ specifically — when it's the very first character (the
+ * onset), never when it's a bare ว/อ right after the onset (or after ั).
  */
 export const splitThaiSyllables = (text) => {
   if (!text) return [];
@@ -51,6 +65,13 @@ export const splitThaiSyllables = (text) => {
 
   while (i < len) {
     const start = i;
+
+    const irregular = matchIrregularSyllable(s, start);
+    if (irregular) {
+      syllables.push(irregular);
+      i = start + irregular.length;
+      continue;
+    }
 
     if (LEADING_VOWELS.has(s[i])) i++;
 
@@ -71,10 +92,29 @@ export const splitThaiSyllables = (text) => {
       }
     }
 
-    let hadVowel = LEADING_VOWELS.has(s[start]);
-    while (i < len && ABOVE_BELOW_VOWELS.has(s[i])) { i++; hadVowel = true; }
+    const hadLeadingVowel = LEADING_VOWELS.has(s[start]);
+    let hadVowel = hadLeadingVowel;
+    let lastAboveBelowVowel = null;
+    while (i < len && ABOVE_BELOW_VOWELS.has(s[i])) { lastAboveBelowVowel = s[i]; i++; hadVowel = true; }
     while (i < len && TONE_MARKS.has(s[i])) i++; // tone mark alone isn't a vowel
-    while (i < len && TRAILING_VOWELS.has(s[i])) { i++; hadVowel = true; }
+    let hadTrailingVowel = false;
+    while (i < len && TRAILING_VOWELS.has(s[i])) { i++; hadVowel = true; hadTrailingVowel = true; }
+
+    // Compound-vowel glide completion — see file doc comment. Must run
+    // before the final-consonant step below, since the glide letter would
+    // otherwise be mistaken for one.
+    if (hadLeadingVowel && lastAboveBelowVowel === 'ี' && s[i] === 'ย') {
+      i++; // เอีย
+    } else if (hadLeadingVowel && lastAboveBelowVowel === 'ื' && s[i] === 'อ') {
+      i++; // เอือ
+    } else if (!hadLeadingVowel && !hadTrailingVowel && s[i] === 'ว' &&
+               (lastAboveBelowVowel === 'ั' || lastAboveBelowVowel === null)) {
+      i++; // อัว (explicit ั) or the reduced ว-ลาก spelling (no ั written)
+      hadVowel = true;
+    } else if (!hadLeadingVowel && !hadTrailingVowel && s[i] === 'อ' && lastAboveBelowVowel === null) {
+      i++; // สระออ — a bare อ right after the onset is the vowel, not a consonant
+      hadVowel = true;
+    }
 
     // (G) final consonant — skip when a cluster/ห-นำ pair already explains
     // the lack of a vowel mark; that trailing consonant belongs to the next syllable.
@@ -203,16 +243,49 @@ export const RhymeConfidence = Object.freeze({
  * loanword, non-Thai characters) and rhyme against it should be UNCERTAIN,
  * never a hard failure.
  */
+// Internal-only marker for the สระออ vowel in vowelSkeleton comparisons —
+// see analyzeSyllable's comment. Private-use codepoint, never rendered.
+const OO_VOWEL_MARKER = '';
+
 export const analyzeSyllable = (syllable) => {
   if (!syllable) return { ok: false };
 
-  const cleaned = syllable.replace(/[ก-ฮ]์/g, ''); // strip การันต์
+  const irregular = IRREGULAR_SYLLABLES[syllable];
+  if (irregular) return { ok: true, ...irregular };
+
+  let cleaned = syllable.replace(/[ก-ฮ]์/g, ''); // strip การันต์
   if (!cleaned || /[^ก-ฮเแโใไะ-๋]/.test(cleaned)) {
     return { ok: false }; // contains non-Thai-syllable characters (digits, latin, punctuation)
   }
 
-  const consonants = cleaned.match(/[ก-ฮ]/g) || [];
   const hasLeadingVowel = /^[เแโใไ]/.test(cleaned);
+
+  // Normalize away a compound-vowel glide (เอีย/เอือ/อัว/ออ) before counting
+  // consonants — same rule as splitThaiSyllables' glide detection (see its
+  // doc comment), kept in sync here since this function parses
+  // independently. The reduced ว-ลาก spelling (no ั written, e.g. ห่วง)
+  // gets ั inserted so it normalizes the same as the explicit form (กลัว).
+  // ออ's bare อ has no dedicated combining mark to reuse, so it's replaced
+  // with OO_VOWEL_MARKER — a private-use codepoint, never shown to users,
+  // just distinct from ก-ฮ (won't be miscounted as a consonant) and from ั
+  // (ออ and อัว are different rhymes, must not collapse together).
+  if (hasLeadingVowel && cleaned.includes('ีย')) {
+    cleaned = cleaned.replace('ีย', 'ี');
+  } else if (hasLeadingVowel && cleaned.includes('ือ')) {
+    cleaned = cleaned.replace('ือ', 'ื');
+  } else if (!hasLeadingVowel) {
+    const vIndex = cleaned.indexOf('ว');
+    const oIndex = cleaned.indexOf('อ', 1); // index 0 would be the onset, not the vowel
+    if (vIndex !== -1 && !/[ะาำ]/.test(cleaned.slice(0, vIndex))) {
+      const before = cleaned.slice(0, vIndex);
+      const after = cleaned.slice(vIndex + 1);
+      cleaned = before.endsWith('ั') ? before + after : `${before}ั${after}`;
+    } else if (oIndex !== -1 && !/[ะาำ]/.test(cleaned.slice(0, oIndex))) {
+      cleaned = cleaned.slice(0, oIndex) + OO_VOWEL_MARKER + cleaned.slice(oIndex + 1);
+    }
+  }
+
+  const consonants = cleaned.match(/[ก-ฮ]/g) || [];
   const endsWithConsonant = /[ก-ฮ]$/.test(cleaned);
 
   if (consonants.length === 0 || consonants.length > 2) {
