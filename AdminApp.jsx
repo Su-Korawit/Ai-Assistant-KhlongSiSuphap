@@ -503,6 +503,262 @@ const ChallengesPanel = () => {
   );
 };
 
+// --- Prompt library CRUD ---
+// /api/prompts.js's GET already returns categories nested with their
+// prompts — reused here as the admin listing too (no separate admin GET,
+// same non-sensitive-data reasoning as ChallengesPanel/ValidatorSettings).
+
+const CategoryPrompts = ({ category, onChanged }) => {
+  const [newPromptText, setNewPromptText] = useState('');
+  const [editingPromptId, setEditingPromptId] = useState(null);
+  const [editingPromptText, setEditingPromptText] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [categoryName, setCategoryName] = useState(category.name);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const addPrompt = async () => {
+    const text = newPromptText.trim();
+    if (!text) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch('/api/prompts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category_id: category.id, text }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'เพิ่มโจทย์ไม่สำเร็จ');
+      setNewPromptText('');
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveEditedPrompt = async (id) => {
+    const text = editingPromptText.trim();
+    if (!text) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch('/api/prompts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, text }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'แก้ไขไม่สำเร็จ');
+      setEditingPromptId(null);
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deletePrompt = async (id) => {
+    if (!confirm('ลบโจทย์นี้ถาวร?')) return;
+    setError('');
+    try {
+      const res = await fetch('/api/prompts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) throw new Error('ลบไม่สำเร็จ');
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const saveRename = async () => {
+    const name = categoryName.trim();
+    if (!name) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch('/api/prompt-categories', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: category.id, name, sort_order: category.sort_order }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'เปลี่ยนชื่อไม่สำเร็จ');
+      setRenaming(false);
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteCategory = async () => {
+    if (!confirm(`ลบหมวด "${category.name}" ถาวร? โจทย์ทั้งหมด ${category.prompts.length} ข้อในหมวดนี้จะถูกลบไปด้วย`)) return;
+    setError('');
+    try {
+      const res = await fetch('/api/prompt-categories', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: category.id }),
+      });
+      if (!res.ok) throw new Error('ลบไม่สำเร็จ');
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="card-pixel p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        {renaming ? (
+          <div className="flex items-center gap-2 flex-1">
+            <input
+              className="input-pixel flex-1 px-2 py-1 text-sm"
+              value={categoryName}
+              onChange={(e) => setCategoryName(e.target.value)}
+              autoFocus
+            />
+            <button onClick={saveRename} className="btn-pixel btn-primary px-2 py-1 text-xs" disabled={busy}>บันทึก</button>
+            <button onClick={() => { setRenaming(false); setCategoryName(category.name); }} className="btn-pixel btn-secondary px-2 py-1 text-xs">ยกเลิก</button>
+          </div>
+        ) : (
+          <h3 className="font-heading font-bold" style={{ color: 'var(--c-charcoal)' }}>{category.name}</h3>
+        )}
+        {!renaming && (
+          <div className="flex gap-2 flex-shrink-0">
+            <button onClick={() => setRenaming(true)} className="btn-pixel btn-secondary px-2 py-1 text-xs"><Pencil className="w-3 h-3" /></button>
+            <button onClick={deleteCategory} className="btn-pixel btn-danger px-2 py-1 text-xs"><Trash2 className="w-3 h-3" /></button>
+          </div>
+        )}
+      </div>
+
+      <ul className="space-y-1">
+        {category.prompts.map((p) => (
+          <li key={p.id} className="flex items-center gap-2">
+            {editingPromptId === p.id ? (
+              <>
+                <input
+                  className="input-pixel flex-1 px-2 py-1 text-sm"
+                  value={editingPromptText}
+                  onChange={(e) => setEditingPromptText(e.target.value)}
+                  autoFocus
+                />
+                <button onClick={() => saveEditedPrompt(p.id)} className="btn-pixel btn-primary px-2 py-1 text-xs" disabled={busy}>บันทึก</button>
+                <button onClick={() => setEditingPromptId(null)} className="btn-pixel btn-secondary px-2 py-1 text-xs">ยกเลิก</button>
+              </>
+            ) : (
+              <>
+                <span className="flex-1 text-sm" style={{ color: 'var(--c-charcoal)' }}>{p.text}</span>
+                <button onClick={() => { setEditingPromptId(p.id); setEditingPromptText(p.text); }} className="btn-pixel btn-secondary px-2 py-1 text-xs"><Pencil className="w-3 h-3" /></button>
+                <button onClick={() => deletePrompt(p.id)} className="btn-pixel btn-danger px-2 py-1 text-xs"><Trash2 className="w-3 h-3" /></button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      <div className="flex gap-2">
+        <input
+          className="input-pixel flex-1 px-2 py-1 text-sm"
+          placeholder="เพิ่มโจทย์ใหม่ในหมวดนี้"
+          value={newPromptText}
+          onChange={(e) => setNewPromptText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addPrompt()}
+        />
+        <button onClick={addPrompt} className="btn-pixel btn-primary px-3 py-1 text-xs" disabled={busy}>
+          <Plus className="w-3 h-3" /> เพิ่ม
+        </button>
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--c-brick)' }}>
+          <AlertCircle className="w-3 h-3 flex-shrink-0" /> {error}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PromptsPanel = () => {
+  const [themes, setThemes] = useState(null);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [error, setError] = useState('');
+  const [addingCategory, setAddingCategory] = useState(false);
+
+  const load = () => {
+    fetch('/api/prompts')
+      .then((res) => res.json())
+      .then(setThemes)
+      .catch(() => setError('โหลดคลังโจทย์ไม่สำเร็จ'));
+  };
+
+  useEffect(load, []);
+
+  const addCategory = async () => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    setAddingCategory(true);
+    setError('');
+    try {
+      const res = await fetch('/api/prompt-categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, sort_order: themes?.length ?? 0 }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'เพิ่มหมวดไม่สำเร็จ');
+      setNewCategoryName('');
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAddingCategory(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <h2 className="font-heading text-lg font-bold" style={{ color: 'var(--c-charcoal)' }}>คลังโจทย์</h2>
+
+      {themes === null ? (
+        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--c-sage)' }} />
+      ) : (
+        <div className="space-y-3">
+          {themes.map((category) => (
+            <CategoryPrompts key={category.id} category={category} onChanged={load} />
+          ))}
+          {themes.length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--c-sage-dark)' }}>ยังไม่มีหมวดโจทย์</p>
+          )}
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-2">
+        <input
+          className="input-pixel flex-1 px-3 py-2 text-sm"
+          placeholder="ชื่อหมวดใหม่"
+          value={newCategoryName}
+          onChange={(e) => setNewCategoryName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addCategory()}
+        />
+        <button onClick={addCategory} className="btn-pixel btn-primary px-3 py-2 text-sm" disabled={addingCategory}>
+          <Plus className="w-4 h-4" /> เพิ่มหมวด
+        </button>
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--c-brick)' }}>
+          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AdminDashboard = ({ username, onLoggedOut }) => {
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -535,8 +791,11 @@ const AdminDashboard = ({ username, onLoggedOut }) => {
         <div style={{ borderTop: '2px solid var(--c-charcoal)', paddingTop: '2rem' }}>
           <ChallengesPanel />
         </div>
+        <div style={{ borderTop: '2px solid var(--c-charcoal)', paddingTop: '2rem' }}>
+          <PromptsPanel />
+        </div>
         <p className="text-xs pt-4" style={{ color: 'var(--c-sage-dark)', borderTop: '2px solid var(--c-charcoal)' }}>
-          คลังโจทย์, เอกสาร Algorithm — จะมาในขั้นถัดไป
+          เอกสาร Algorithm — จะมาในขั้นถัดไป
         </p>
       </main>
     </div>

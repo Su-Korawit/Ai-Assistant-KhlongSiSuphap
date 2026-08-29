@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Send, Loader2, ArrowRight, AlertCircle, AlertTriangle, Trash2, CheckCircle2, Save, Lock, Shuffle } from 'lucide-react';
 import { BAHT_SCHEME } from './klongRules.js';
 import { validateKlong } from './klongValidator.js';
-import { THEMES, getRandomTheme } from './klongPrompts.js';
+import { getRandomTheme } from './klongPrompts.js';
 import { loadProgress, saveProgress } from './progressStore.js';
 import SharedStyles from './SharedStyles.jsx';
 
@@ -420,7 +420,7 @@ const computeLevelScore = (validation) => {
   return Math.round(toneScore + rhymeScore);
 };
 
-const Challenge = ({ allowTonePenalty }) => {
+const Challenge = ({ allowTonePenalty, promptThemes }) => {
   const [challenges, setChallenges] = useState(null); // null = loading
   const [loadError, setLoadError] = useState('');
   const [progress, setProgress] = useState(loadProgress);
@@ -428,7 +428,7 @@ const Challenge = ({ allowTonePenalty }) => {
     const p = loadProgress();
     return p.unlocked[p.unlocked.length - 1] ?? 0;
   });
-  const [theme, setTheme] = useState(getRandomTheme);
+  const [theme, setTheme] = useState({ category: '', prompt: '' });
   const [words, setWords] = useState(createEmptyWords);
   const [result, setResult] = useState(null);
 
@@ -439,6 +439,15 @@ const Challenge = ({ allowTonePenalty }) => {
       .catch(() => setLoadError('โหลดด่านท้าทายไม่สำเร็จ ลองรีเฟรชหน้านี้อีกครั้ง'));
   }, []);
 
+  // promptThemes loads asynchronously at the App level and may not be
+  // ready on first render — pick the initial theme once it arrives rather
+  // than getRandomTheme([]) permanently returning an empty placeholder.
+  useEffect(() => {
+    if (promptThemes.length > 0 && !theme.prompt) {
+      setTheme(getRandomTheme(promptThemes));
+    }
+  }, [promptThemes]);
+
   const level = challenges?.[currentLevelIndex];
   const validation = useMemo(() => validateKlong(words, { allowTonePenalty }), [words, allowTonePenalty]);
   const { toneMap, rhymeMap } = useMemo(() => buildToneRhymeMaps(validation), [validation]);
@@ -446,7 +455,7 @@ const Challenge = ({ allowTonePenalty }) => {
   const switchLevel = (index) => {
     setCurrentLevelIndex(index);
     setWords(createEmptyWords());
-    setTheme(getRandomTheme());
+    setTheme(getRandomTheme(promptThemes));
     setResult(null);
   };
 
@@ -536,7 +545,7 @@ const Challenge = ({ allowTonePenalty }) => {
         <div className="card-pixel p-4 mb-6 flex flex-wrap items-center gap-3">
           <span className="badge-pixel px-2 py-1 text-xs font-bold bg-[#D0E8F2]">{theme.category}</span>
           <span className="font-body font-medium">โจทย์: “{theme.prompt}”</span>
-          <button onClick={() => setTheme(getRandomTheme())} className="btn-pixel btn-secondary px-3 py-1 text-xs ml-auto">
+          <button onClick={() => setTheme(getRandomTheme(promptThemes))} className="btn-pixel btn-secondary px-3 py-1 text-xs ml-auto">
             <Shuffle className="w-4 h-4" /> สุ่มหัวข้อใหม่
           </button>
         </div>
@@ -596,23 +605,23 @@ const Challenge = ({ allowTonePenalty }) => {
 
 // --- Prompt / theme library ---
 
-const PromptLibrary = ({ onSelectPrompt }) => (
+const PromptLibrary = ({ onSelectPrompt, promptThemes }) => (
   <section className="py-12 bg-[#F5F0E8] min-h-screen">
     <div className="max-w-4xl mx-auto px-4">
       <h2 className="font-heading font-bold text-3xl text-[#2C2C2C] mb-2">คลังโจทย์ร่วมสมัย</h2>
       <p className="font-body text-[#5A7A5E] font-bold mb-8">เลือกหัวข้อเพื่อนำไปใช้กับผู้ช่วยทรงปัญญา</p>
       <div className="grid md:grid-cols-3 gap-6">
-        {THEMES.map((theme) => (
-          <div key={theme.category} className="card-pixel p-5">
+        {promptThemes.map((theme) => (
+          <div key={theme.id} className="card-pixel p-5">
             <h3 className="font-heading font-bold text-lg text-[#2C2C2C] mb-3">{theme.category}</h3>
             <ul className="space-y-2">
               {theme.prompts.map((prompt) => (
-                <li key={prompt}>
+                <li key={prompt.id}>
                   <button
-                    onClick={() => onSelectPrompt(prompt)}
+                    onClick={() => onSelectPrompt(prompt.text)}
                     className="w-full text-left btn-pixel btn-secondary px-3 py-2 text-sm"
                   >
-                    {prompt}
+                    {prompt.text}
                   </button>
                 </li>
               ))}
@@ -686,11 +695,21 @@ export default function App() {
   // validator_settings' own default, so the check doesn't briefly loosen
   // then tighten on every page load.
   const [allowTonePenalty, setAllowTonePenalty] = useState(false);
+  // Fetched once here (not inside PromptLibrary/Challenge separately) so
+  // switching tabs doesn't re-fetch, and both consumers stay in sync.
+  const [promptThemes, setPromptThemes] = useState([]);
 
   useEffect(() => {
     fetch('/api/validator-settings')
       .then((res) => res.json())
       .then((data) => setAllowTonePenalty(Boolean(data.allow_tone_penalty)))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/prompts')
+      .then((res) => res.json())
+      .then(setPromptThemes)
       .catch(() => {});
   }, []);
 
@@ -748,10 +767,10 @@ export default function App() {
           />
         </div>
         <div id="panel-challenge" role="tabpanel" aria-labelledby="tab-challenge" hidden={activeTab !== 'challenge'}>
-          <Challenge allowTonePenalty={allowTonePenalty} />
+          <Challenge allowTonePenalty={allowTonePenalty} promptThemes={promptThemes} />
         </div>
         <div id="panel-library" role="tabpanel" aria-labelledby="tab-library" hidden={activeTab !== 'library'}>
-          <PromptLibrary onSelectPrompt={handleSelectPrompt} />
+          <PromptLibrary onSelectPrompt={handleSelectPrompt} promptThemes={promptThemes} />
         </div>
       </main>
 

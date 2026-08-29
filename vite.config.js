@@ -9,6 +9,8 @@ const API_ROUTES = {
   '/api/ai-settings': '/api/ai-settings.js',
   '/api/validator-settings': '/api/validator-settings.js',
   '/api/challenges': '/api/challenges.js',
+  '/api/prompts': '/api/prompts.js',
+  '/api/prompt-categories': '/api/prompt-categories.js',
   '/api/admin/login': '/api/admin/login.js',
   '/api/admin/logout': '/api/admin/logout.js',
   '/api/admin/session': '/api/admin/session.js',

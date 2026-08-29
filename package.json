@@ -10,7 +10,8 @@
     "test": "vitest run",
     "db:migrate": "node db/migrate.js",
     "db:seed-admin": "node db/seed-admin.js",
-    "db:seed-challenges": "node db/seed-challenges.js"
+    "db:seed-challenges": "node db/seed-challenges.js",
+    "db:seed-prompts": "node db/seed-prompts.js"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
