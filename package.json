@@ -8,9 +8,13 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "db:migrate": "node db/migrate.js"
+    "db:migrate": "node db/migrate.js",
+    "db:seed-admin": "node db/seed-admin.js"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "bcryptjs": "^3.0.3",
+    "iron-session": "^8.0.4",
     "lucide-react": "^0.441.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

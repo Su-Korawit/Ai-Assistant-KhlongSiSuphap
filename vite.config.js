@@ -1,26 +1,37 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Serves api/generate-klong.js locally under `npm run dev`, mirroring how
-// Vercel serves the same file as a serverless function in production —
-// one handler, no dev/prod drift.
+// Serves api/*.js locally under `npm run dev`, mirroring how Vercel serves
+// the same files as serverless functions in production — one handler per
+// route, no dev/prod drift.
+const API_ROUTES = {
+  '/api/generate-klong': '/api/generate-klong.js',
+  '/api/admin/login': '/api/admin/login.js',
+  '/api/admin/logout': '/api/admin/logout.js',
+  '/api/admin/session': '/api/admin/session.js',
+}
+
 const apiDevMiddleware = () => ({
   name: 'api-dev-middleware',
   configureServer(server) {
-    server.middlewares.use('/api/generate-klong', async (req, res) => {
-      const { default: handler } = await server.ssrLoadModule('/api/generate-klong.js')
-      await handler(req, res)
-    })
+    for (const [route, modulePath] of Object.entries(API_ROUTES)) {
+      server.middlewares.use(route, async (req, res) => {
+        const { default: handler } = await server.ssrLoadModule(modulePath)
+        await handler(req, res)
+      })
+    }
   },
 })
 
 export default defineConfig(({ mode }) => {
   // Vite only puts VITE_-prefixed vars on import.meta.env for client code —
   // by design, so server secrets never reach the browser. The dev
-  // middleware above runs server-side Node code, so it needs
-  // GEMINI_API_KEY on process.env explicitly, same as Vercel provides in prod.
+  // middleware above runs server-side Node code, so it needs these on
+  // process.env explicitly, same as Vercel provides in prod.
   const env = loadEnv(mode, process.cwd(), '')
-  if (env.GEMINI_API_KEY) process.env.GEMINI_API_KEY = env.GEMINI_API_KEY
+  for (const key of ['GEMINI_API_KEY', 'DATABASE_URL', 'SESSION_SECRET']) {
+    if (env[key]) process.env[key] = env[key]
+  }
 
   return {
     plugins: [react(), apiDevMiddleware()],
