@@ -35,5 +35,17 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), apiDevMiddleware()],
+    // Two real bundles, not one router: /admin never ships to a public
+    // visitor's browser and vice versa (see CLAUDE.md's route-structure
+    // note). vercel.json rewrites the /admin path to admin.html in prod;
+    // in dev, Vite serves it directly at /admin.html.
+    build: {
+      rollupOptions: {
+        input: {
+          main: `${import.meta.dirname}/index.html`,
+          admin: `${import.meta.dirname}/admin.html`,
+        },
+      },
+    },
   }
 })
