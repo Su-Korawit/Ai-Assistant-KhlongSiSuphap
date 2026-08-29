@@ -391,30 +391,13 @@ const KlongEditor = ({ prefillBaht, markComplete, allowTonePenalty }) => {
 };
 
 // --- Challenge mode (gamified levels) ---
+// Levels used to be the hardcoded CHALLENGE_LEVELS array; now DB-backed
+// (challenges table, via api/challenges.js) so admins can add/edit/remove
+// them. Progress tracking below intentionally keys off *array position*
+// (0-based index into the fetched, sort_order-sorted list), not the DB id
+// — ids aren't guaranteed contiguous or stable once admin CRUD can delete
+// or reorder levels, but "the Nth level in the current list" always is.
 
-const CHALLENGE_LEVELS = [
-  {
-    id: 1,
-    title: 'ด่านที่ ๑ · แต่งวรรคเดียว',
-    description: 'ฝึกกับวรรคหน้าของบาทที่ ๑ (๕ คำ) เริ่มจากจุดที่เล็กที่สุดก่อน',
-    segments: [{ bahtIndex: 0, count: 5 }],
-    badge: '🌱 นักฝึกวรรคแรก',
-  },
-  {
-    id: 2,
-    title: 'ด่านที่ ๒ · แต่งครบหนึ่งบาท',
-    description: 'ฝึกบาทที่ ๑ ให้ครบทั้ง ๗ คำ ทั้งวรรคหน้าและวรรคหลัง',
-    segments: [{ bahtIndex: 0, count: 7 }],
-    badge: '🪶 นักแต่งหนึ่งบาท',
-  },
-  {
-    id: 3,
-    title: 'ด่านที่ ๓ · แต่งเต็มบท',
-    description: 'ท้าทายที่สุด: แต่งครบทั้ง ๔ บาท พร้อมตรวจสัมผัสระหว่างบท',
-    segments: BAHT_SCHEME.map((b, i) => ({ bahtIndex: i, count: b.wordCount })),
-    badge: '👑 เจ้าแห่งโคลงสี่สุภาพ',
-  },
-];
 const CHALLENGE_PASS_SCORE = 80;
 
 const isLevelFilled = (level, words) =>
@@ -438,21 +421,30 @@ const computeLevelScore = (validation) => {
 };
 
 const Challenge = ({ allowTonePenalty }) => {
+  const [challenges, setChallenges] = useState(null); // null = loading
+  const [loadError, setLoadError] = useState('');
   const [progress, setProgress] = useState(loadProgress);
-  const [currentLevelId, setCurrentLevelId] = useState(() => {
+  const [currentLevelIndex, setCurrentLevelIndex] = useState(() => {
     const p = loadProgress();
-    return p.unlocked[p.unlocked.length - 1] || 1;
+    return p.unlocked[p.unlocked.length - 1] ?? 0;
   });
   const [theme, setTheme] = useState(getRandomTheme);
   const [words, setWords] = useState(createEmptyWords);
   const [result, setResult] = useState(null);
 
-  const level = CHALLENGE_LEVELS.find((l) => l.id === currentLevelId);
+  useEffect(() => {
+    fetch('/api/challenges')
+      .then((res) => res.json())
+      .then(setChallenges)
+      .catch(() => setLoadError('โหลดด่านท้าทายไม่สำเร็จ ลองรีเฟรชหน้านี้อีกครั้ง'));
+  }, []);
+
+  const level = challenges?.[currentLevelIndex];
   const validation = useMemo(() => validateKlong(words, { allowTonePenalty }), [words, allowTonePenalty]);
   const { toneMap, rhymeMap } = useMemo(() => buildToneRhymeMaps(validation), [validation]);
 
-  const switchLevel = (id) => {
-    setCurrentLevelId(id);
+  const switchLevel = (index) => {
+    setCurrentLevelIndex(index);
     setWords(createEmptyWords());
     setTheme(getRandomTheme());
     setResult(null);
@@ -482,13 +474,13 @@ const Challenge = ({ allowTonePenalty }) => {
     setProgress((prev) => {
       const next = {
         unlocked: [...prev.unlocked],
-        bestScores: { ...prev.bestScores, [level.id]: Math.max(prev.bestScores[level.id] || 0, score) },
+        bestScores: { ...prev.bestScores, [currentLevelIndex]: Math.max(prev.bestScores[currentLevelIndex] || 0, score) },
         badges: [...prev.badges],
       };
       const newBadge = passed && !next.badges.includes(level.badge);
       if (newBadge) next.badges.push(level.badge);
-      if (passed && level.id < CHALLENGE_LEVELS.length && !next.unlocked.includes(level.id + 1)) {
-        next.unlocked.push(level.id + 1);
+      if (passed && currentLevelIndex < challenges.length - 1 && !next.unlocked.includes(currentLevelIndex + 1)) {
+        next.unlocked.push(currentLevelIndex + 1);
       }
       saveProgress(next);
       setResult({ status: passed ? 'ok' : 'bad', score, passed, newBadge, correctRequired, requiredSlots, rhymeOk, rhymeChecks });
@@ -496,21 +488,43 @@ const Challenge = ({ allowTonePenalty }) => {
     });
   };
 
+  if (loadError) {
+    return (
+      <section className="py-12 bg-[#F5F0E8] min-h-screen">
+        <div className="max-w-4xl mx-auto px-4 text-center font-body font-bold" style={{ color: '#C0392B' }}>{loadError}</div>
+      </section>
+    );
+  }
+  if (!challenges) {
+    return (
+      <section className="py-12 bg-[#F5F0E8] min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-[#7A9E7E]" />
+      </section>
+    );
+  }
+  if (challenges.length === 0) {
+    return (
+      <section className="py-12 bg-[#F5F0E8] min-h-screen">
+        <div className="max-w-4xl mx-auto px-4 text-center font-body font-bold text-[#5A7A5E]">ยังไม่มีด่านท้าทาย</div>
+      </section>
+    );
+  }
+
   return (
     <section className="py-12 bg-[#F5F0E8] min-h-screen">
       <div className="max-w-4xl mx-auto px-4">
 
         <div className="flex flex-wrap gap-2 mb-6">
-          {CHALLENGE_LEVELS.map((lvl) => {
-            const unlocked = progress.unlocked.includes(lvl.id);
+          {challenges.map((lvl, index) => {
+            const unlocked = progress.unlocked.includes(index);
             return (
               <button
                 key={lvl.id}
                 disabled={!unlocked}
-                onClick={() => switchLevel(lvl.id)}
-                className={`btn-pixel px-4 py-2 text-sm ${lvl.id === currentLevelId ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => switchLevel(index)}
+                className={`btn-pixel px-4 py-2 text-sm ${index === currentLevelIndex ? 'btn-primary' : 'btn-secondary'}`}
               >
-                {!unlocked && <Lock className="w-3 h-3" />} ด่าน {lvl.id}
+                {!unlocked && <Lock className="w-3 h-3" />} ด่าน {index + 1}
               </button>
             );
           })}

@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "db:migrate": "node db/migrate.js",
-    "db:seed-admin": "node db/seed-admin.js"
+    "db:seed-admin": "node db/seed-admin.js",
+    "db:seed-challenges": "node db/seed-challenges.js"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
