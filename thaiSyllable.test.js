@@ -234,3 +234,27 @@ describe('irregular syllables (silent ร: ทร→ซ, จร-silent, ไซ�
     expect(compareRhyme('ทราย', 'ตาย')).toBe(RhymeConfidence.EXACT);
   });
 });
+
+describe('ร หัน (รร ซ้อน)', () => {
+  it('มีตัวสะกดตาม: รร + final consonant with nothing after it reads as ะ+final, one syllable', () => {
+    expect(splitThaiSyllables('กรรม')).toEqual(['กรรม']);
+    expect(splitThaiSyllables('ธรรม')).toEqual(['ธรรม']);
+    expect(splitThaiSyllables('สรรพ')).toEqual(['สรรพ']);
+    expect(splitThaiSyllables('วรรค')).toEqual(['วรรค']);
+  });
+
+  it('ไม่มีตัวสะกดตาม: รร followed by a consonant that carries its own vowel closes with an implicit ัน, next syllable starts fresh', () => {
+    expect(splitThaiSyllables('บรรจุ')).toEqual(['บรร', 'จุ']);
+    expect(splitThaiSyllables('บรรทัด')).toEqual(['บรร', 'ทัด']);
+  });
+
+  it('sanity: วรรณ and พรรณ (same shape, different onset) split identically', () => {
+    expect(splitThaiSyllables('วรรณ')).toEqual(['วรรณ']);
+    expect(splitThaiSyllables('พรรณ')).toEqual(['พรรณ']);
+  });
+
+  it('regression: a real ควบกล้ำ onset (กร, คร, ...) followed by a single ร is unaffected', () => {
+    expect(splitThaiSyllables('ครัว')).toEqual(['ครัว']);
+    expect(splitThaiSyllables('กราบ')).toEqual(['กราบ']);
+  });
+});

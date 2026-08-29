@@ -83,6 +83,36 @@ export const splitThaiSyllables = (text) => {
     }
     i++; // (B) onset consonant
 
+    // ร หัน (รร ซ้อน): a written double-ร right after the onset is a general
+    // orthographic rule, not a word-specific irregularity — checked before
+    // the cluster/ห-นำ pair below so a real CLUSTERS entry like 'กร' doesn't
+    // greedily eat the first ร of "กรรม" and misread it as a cluster.
+    // Two shapes: a plain consonant right after รร with nothing of its own
+    // following it is the syllable's final (กรรม, สรรพ — read ะ+final, one
+    // syllable); a consonant that carries its own vowel starts a new
+    // syllable instead, and รร closes this one with an implicit ัน (บรรจุ →
+    // บรร + จุ).
+    if (s[i] === 'ร' && s[i + 1] === 'ร') {
+      const afterIdx = i + 2;
+      const nextConsonant = isConsonant(s[afterIdx]) ? s[afterIdx] : null;
+      let peek = afterIdx + 1;
+      let ownsVowel = false;
+      if (nextConsonant) {
+        while (peek < len && ABOVE_BELOW_VOWELS.has(s[peek])) { ownsVowel = true; peek++; }
+        while (peek < len && TONE_MARKS.has(s[peek])) peek++;
+        while (peek < len && TRAILING_VOWELS.has(s[peek])) { ownsVowel = true; peek++; }
+      }
+      if (nextConsonant && !ownsVowel) {
+        i = afterIdx + 1;
+        if (s[i] === '์') i++;
+        else if (isConsonant(s[i]) && s[i + 1] === '์') i += 2;
+      } else {
+        i = afterIdx;
+      }
+      syllables.push(s.slice(start, i));
+      continue;
+    }
+
     let hasClusterOrNam = false;
     if (isConsonant(s[i])) {
       const pair = s[i - 1] + s[i];
