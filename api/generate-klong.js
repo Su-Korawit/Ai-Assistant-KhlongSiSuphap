@@ -1,5 +1,6 @@
 import { validateKlong } from '../klongValidator.js';
 import { BAHT_SCHEME, RHYME_GROUPS, MIN_ACCEPTABLE_SCORE } from '../klongRules.js';
+import { sql } from '../db/client.js';
 
 // Written against raw Node http req/res (not Vercel-specific helpers) so the
 // exact same handler runs under Vercel's Node runtime in production AND
@@ -28,9 +29,25 @@ function buildRhymeDescription() {
   ).join('\n');
 }
 
-function buildPrompt(topic) {
-  return `ทำหน้าที่เป็นกวีเอกผู้เชี่ยวชาญด้านภาษาไทยและฉันทลักษณ์โคลงสี่สุภาพ
-จงแต่งโคลงสี่สุภาพ 1 บท (4 บาท) ในหัวข้อ: "${topic}"
+const DEFAULT_INTRO = (topic) => `ทำหน้าที่เป็นกวีเอกผู้เชี่ยวชาญด้านภาษาไทยและฉันทลักษณ์โคลงสี่สุภาพ
+จงแต่งโคลงสี่สุภาพ 1 บท (4 บาท) ในหัวข้อ: "${topic}"`;
+
+// Admin-editable via ai_settings.prompt_template (api/admin/ai-settings.js).
+// Only the intro/persona line is overridable — the structural scheme
+// (below) always comes from klongRules.js regardless, since that's the
+// single source of truth the deterministic validateKlong checks against
+// (CLAUDE.md's "Pure logic modules" rule); letting a free-text admin
+// prompt override it would let the AI and the validator disagree about
+// what "correct" means.
+function buildIntro(topic, promptTemplate) {
+  if (promptTemplate && promptTemplate.includes('{topic}')) {
+    return promptTemplate.replaceAll('{topic}', topic);
+  }
+  return DEFAULT_INTRO(topic);
+}
+
+function buildPrompt(topic, promptTemplate) {
+  return `${buildIntro(topic, promptTemplate)}
 
 โครงสร้างฉันทลักษณ์ที่ต้องปฏิบัติตามอย่างเคร่งครัด (นับพยางค์ที่ออกเสียงจริง ไม่ใช่จำนวนคำเขียน):
 ${buildSchemeDescription()}
@@ -52,9 +69,9 @@ ${buildRhymeDescription()}
 }`;
 }
 
-function buildRefinePrompt(topic, previousBaht, errors) {
+function buildRefinePrompt(topic, previousBaht, errors, promptTemplate) {
   const errorList = errors.map(e => `- ${e.message}`).join('\n');
-  return `${buildPrompt(topic)}
+  return `${buildPrompt(topic, promptTemplate)}
 
 ความพยายามครั้งก่อนของคุณคือ:
 ${JSON.stringify({ baht: previousBaht })}
@@ -126,10 +143,14 @@ async function readJsonBody(req) {
 }
 
 /**
- * generateKlong(topic, apiKey)
+ * generateKlong(topic, apiKey, promptTemplate)
  * Generate → validate → (if invalid) send targeted feedback → regenerate,
  * up to MAX_REFINE_ATTEMPTS. Always returns the best-scoring attempt seen,
  * never loops unbounded (Section 15).
+ *
+ * `promptTemplate` is the admin-editable intro override (ai_settings table,
+ * see buildIntro's comment) — optional, falls back to the default persona
+ * intro when omitted or missing a {topic} placeholder.
  *
  * `meetsThreshold` tells the caller whether that best attempt is good
  * enough to present as a finished poem (score >= MIN_ACCEPTABLE_SCORE) —
@@ -137,10 +158,10 @@ async function readJsonBody(req) {
  * caller can show the user how close it got rather than just a bare
  * failure (Rule 3: the AI never overrides validateKlong's verdict).
  */
-export async function generateKlong(topic, apiKey) {
+export async function generateKlong(topic, apiKey, promptTemplate) {
   let best = null;
   let attempts = 0;
-  let baht = await callGemini(apiKey, buildPrompt(topic));
+  let baht = await callGemini(apiKey, buildPrompt(topic, promptTemplate));
 
   while (attempts < MAX_REFINE_ATTEMPTS) {
     attempts++;
@@ -150,7 +171,7 @@ export async function generateKlong(topic, apiKey) {
     }
     if (validation.valid) break;
     if (attempts >= MAX_REFINE_ATTEMPTS) break;
-    baht = await callGemini(apiKey, buildRefinePrompt(topic, baht, validation.errors));
+    baht = await callGemini(apiKey, buildRefinePrompt(topic, baht, validation.errors, promptTemplate));
   }
 
   const meetsThreshold = (best.validation.score ?? 0) >= MIN_ACCEPTABLE_SCORE;
@@ -171,6 +192,14 @@ export default async function handler(req, res) {
     return;
   }
 
+  const [aiSettings] = await sql`select ai_enabled, prompt_template from ai_settings where id = 1`;
+  if (aiSettings && !aiSettings.ai_enabled) {
+    res.statusCode = 403;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'ปิดใช้งานผู้ช่วย AI อยู่ในขณะนี้' }));
+    return;
+  }
+
   let body;
   try {
     body = await readJsonBody(req);
@@ -188,7 +217,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const result = await generateKlong(topic, apiKey);
+    const result = await generateKlong(topic, apiKey, aiSettings?.prompt_template);
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify(result));

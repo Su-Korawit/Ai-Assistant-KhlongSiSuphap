@@ -4,6 +4,7 @@
  * same "pure logic, thin handler" split as validateKlong/generateKlong.
  */
 import bcrypt from 'bcryptjs';
+import { getIronSession } from 'iron-session';
 
 const SALT_ROUNDS = 10;
 
@@ -32,3 +33,23 @@ export const getSessionOptions = () => ({
     secure: process.env.NODE_ENV === 'production',
   },
 });
+
+/**
+ * requireAdmin(req, res)
+ * Guard for every protected api/admin/* route beyond login/logout/session
+ * itself. Writes a 401 and returns null when there's no valid session —
+ * the caller's handler should `if (!session) return;` right after calling
+ * this and do nothing else. Returns the live session object (not just a
+ * boolean) so callers that need session.adminId/username don't have to
+ * call getIronSession a second time.
+ */
+export async function requireAdmin(req, res) {
+  const session = await getIronSession(req, res, getSessionOptions());
+  if (!session.adminId) {
+    res.statusCode = 401;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'ต้องเข้าสู่ระบบแอดมิน' }));
+    return null;
+  }
+  return session;
+}

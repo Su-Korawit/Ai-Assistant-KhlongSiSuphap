@@ -1,33 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { hashPassword } from '../../auth.js';
+import { fakeReq, fakeRes } from '../../httpTestUtils.js';
 
 vi.mock('../../db/client.js', () => ({ sql: vi.fn() }));
 vi.stubEnv('SESSION_SECRET', 'x'.repeat(32)); // iron-session requires >= 32 chars
 
 const { sql } = await import('../../db/client.js');
 const { authenticateAdmin, default: handler } = await import('./login.js');
-
-function fakeReq(method, body) {
-  const raw = body === undefined ? '' : JSON.stringify(body);
-  return {
-    method,
-    headers: {},
-    async *[Symbol.asyncIterator]() {
-      if (raw) yield Buffer.from(raw);
-    },
-  };
-}
-
-function fakeRes() {
-  return {
-    statusCode: 200,
-    headers: {},
-    body: '',
-    setHeader(name, value) { this.headers[name] = value; },
-    getHeader(name) { return this.headers[name]; },
-    end(data) { this.body = data ?? ''; },
-  };
-}
 
 describe('authenticateAdmin', () => {
   beforeEach(() => {

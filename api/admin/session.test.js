@@ -1,29 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { sealData } from 'iron-session';
 import { getSessionOptions, ADMIN_SESSION_COOKIE } from '../../auth.js';
+import { fakeReqWithCookie as fakeReq, fakeRes } from '../../httpTestUtils.js';
 
 vi.stubEnv('SESSION_SECRET', 'x'.repeat(32));
 
 const { default: handler } = await import('./session.js');
-
-function fakeReq(method, cookieHeader) {
-  return {
-    method,
-    headers: cookieHeader ? { cookie: cookieHeader } : {},
-    async *[Symbol.asyncIterator]() {},
-  };
-}
-
-function fakeRes() {
-  return {
-    statusCode: 200,
-    headers: {},
-    body: '',
-    setHeader(name, value) { this.headers[name] = value; },
-    getHeader(name) { return this.headers[name]; },
-    end(data) { this.body = data ?? ''; },
-  };
-}
 
 describe('session-check handler', () => {
   it('reports not authenticated when there is no session cookie', async () => {

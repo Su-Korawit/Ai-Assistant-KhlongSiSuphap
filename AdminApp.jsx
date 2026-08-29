@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, LogOut, Loader2, AlertCircle } from 'lucide-react';
+import { Lock, LogOut, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import SharedStyles from './SharedStyles.jsx';
 
 /**
@@ -86,6 +86,103 @@ const LoginForm = ({ onLoggedIn }) => {
   );
 };
 
+const Toggle = ({ label, checked, onChange }) => (
+  <label className="flex items-center gap-3 cursor-pointer select-none">
+    <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="w-5 h-5" />
+    <span style={{ color: 'var(--c-charcoal)' }}>{label}</span>
+  </label>
+);
+
+const AiSettingsPanel = () => {
+  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetch('/api/admin/ai-settings')
+      .then((res) => res.json())
+      .then((data) => { setSettings(data); setLoading(false); })
+      .catch(() => { setError('โหลดการตั้งค่าไม่สำเร็จ'); setLoading(false); });
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const res = await fetch('/api/admin/ai-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'บันทึกไม่สำเร็จ');
+      setSettings(data);
+      setMessage('บันทึกแล้ว');
+    } catch (err) {
+      setError(err.message || 'บันทึกไม่สำเร็จ');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--c-sage)' }} />;
+  }
+  if (!settings) {
+    return <p style={{ color: 'var(--c-brick)' }}>{error || 'โหลดการตั้งค่าไม่สำเร็จ'}</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="font-heading text-lg font-bold" style={{ color: 'var(--c-charcoal)' }}>ผู้ช่วย AI</h2>
+
+      <Toggle
+        label="เปิดใช้งานผู้ช่วย AI (ปุ่ม “สร้างโคลง”)"
+        checked={settings.ai_enabled}
+        onChange={(v) => setSettings({ ...settings, ai_enabled: v })}
+      />
+      <Toggle
+        label="เปิดใช้งานปุ่ม “นำไปแก้ไขใน KlongEditor” (autofill)"
+        checked={settings.ai_autofill_enabled}
+        onChange={(v) => setSettings({ ...settings, ai_autofill_enabled: v })}
+      />
+
+      <div>
+        <label className="block text-sm mb-1" style={{ color: 'var(--c-charcoal)' }}>
+          Prompt override (ใส่ {'{topic}'} แทนหัวข้อ — เว้นว่างไว้เพื่อใช้ค่าเริ่มต้น)
+        </label>
+        <textarea
+          className="input-pixel w-full px-3 py-2 h-28 resize-none font-mono text-sm"
+          value={settings.prompt_template ?? ''}
+          onChange={(e) => setSettings({ ...settings, prompt_template: e.target.value })}
+          placeholder='เช่น: เขียนโคลงสี่สุภาพแนวขำขันเกี่ยวกับ "{topic}"'
+        />
+        <p className="text-xs mt-1" style={{ color: 'var(--c-sage-dark)' }}>
+          กฎฉันทลักษณ์ (จำนวนคำ, เอก-โท, สัมผัส) มาจาก klongRules.js เสมอ ไม่ว่า prompt นี้จะเขียนว่าอย่างไร
+        </p>
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--c-brick)' }}>
+          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+        </div>
+      )}
+      {message && (
+        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--c-sage-dark)' }}>
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> {message}
+        </div>
+      )}
+
+      <button onClick={handleSave} className="btn-pixel btn-primary px-4 py-2" disabled={saving}>
+        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'บันทึก'}
+      </button>
+    </div>
+  );
+};
+
 const AdminDashboard = ({ username, onLoggedOut }) => {
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -111,7 +208,10 @@ const AdminDashboard = ({ username, onLoggedOut }) => {
         </div>
       </header>
       <main className="m-4 card-pixel p-8" style={{ color: 'var(--c-charcoal)' }}>
-        <p>แดชบอร์ดแอดมิน — อยู่ระหว่างพัฒนา (AI toggle, ด่านท้าทาย, คลังโจทย์ ฯลฯ จะมาในขั้นถัดไป)</p>
+        <AiSettingsPanel />
+        <p className="text-xs mt-8 pt-4" style={{ color: 'var(--c-sage-dark)', borderTop: '2px solid var(--c-charcoal)' }}>
+          ด่านท้าทาย, คลังโจทย์, เอกโทษ/โทโทษ, เอกสาร Algorithm — จะมาในขั้นถัดไป
+        </p>
       </main>
     </div>
   );

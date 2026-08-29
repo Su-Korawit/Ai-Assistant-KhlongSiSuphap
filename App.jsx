@@ -155,6 +155,10 @@ const AIAssistant = ({ onGenerated, markComplete, initialTopic, onTopicApplied }
   const [status, setStatus] = useState('idle');
   const [result, setResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
+  // Default true while the fetch is in flight, so the button doesn't flash
+  // hidden-then-shown on every load for the common case (admin never
+  // touched the toggle) — the server still enforces ai_enabled either way.
+  const [aiSettings, setAiSettings] = useState({ ai_enabled: true, ai_autofill_enabled: true });
   const textareaRef = useRef(null);
 
   useEffect(() => {
@@ -164,6 +168,13 @@ const AIAssistant = ({ onGenerated, markComplete, initialTopic, onTopicApplied }
       onTopicApplied?.();
     }
   }, [initialTopic]);
+
+  useEffect(() => {
+    fetch('/api/ai-settings')
+      .then((res) => res.json())
+      .then(setAiSettings)
+      .catch(() => {}); // network hiccup — keep the enabled-by-default state
+  }, []);
 
   const handleGenerate = async () => {
     if (!topic.trim()) return;
@@ -193,6 +204,19 @@ const AIAssistant = ({ onGenerated, markComplete, initialTopic, onTopicApplied }
   const handleKeyDown = (e) => {
     if (e.ctrlKey && e.key === 'Enter') handleGenerate();
   };
+
+  if (!aiSettings.ai_enabled) {
+    return (
+      <section id="ผู้ช่วยทรงปัญญา" className="py-12 bg-[#D0E8F2]/40 border-b-[3px] border-[#2C2C2C]">
+        <div className="max-w-2xl mx-auto px-4">
+          <div className="card-pixel p-6 md:p-8 text-center">
+            <h2 className="font-heading font-bold text-2xl text-[#2C2C2C] mb-2">ผู้ช่วยทรงปัญญา</h2>
+            <p className="font-body font-bold text-[#5A7A5E]">ปิดใช้งานชั่วคราว — แต่งโคลงด้วยตนเองได้ในตัวแก้ไขด้านล่าง</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section id="ผู้ช่วยทรงปัญญา" className="py-12 bg-[#D0E8F2]/40 border-b-[3px] border-[#2C2C2C]">
@@ -275,12 +299,14 @@ const AIAssistant = ({ onGenerated, markComplete, initialTopic, onTopicApplied }
                   หมายเหตุ: ระบบพยายามแก้ไข {result.attempts} ครั้ง ยังมีจุดที่ไม่สมบูรณ์ — แก้ไขเพิ่มเติมได้ในตัวแก้ไขด้านล่าง
                 </p>
               )}
-              <button
-                onClick={() => onGenerated(result.baht)}
-                className="w-full btn-pixel btn-secondary py-3 px-4 font-bold text-lg"
-              >
-                นำไปแก้ไขใน KlongEditor <ArrowRight className="w-5 h-5" />
-              </button>
+              {aiSettings.ai_autofill_enabled && (
+                <button
+                  onClick={() => onGenerated(result.baht)}
+                  className="w-full btn-pixel btn-secondary py-3 px-4 font-bold text-lg"
+                >
+                  นำไปแก้ไขใน KlongEditor <ArrowRight className="w-5 h-5" />
+                </button>
+              )}
             </div>
           )}
 

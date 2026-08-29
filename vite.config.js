@@ -6,9 +6,11 @@ import react from '@vitejs/plugin-react'
 // route, no dev/prod drift.
 const API_ROUTES = {
   '/api/generate-klong': '/api/generate-klong.js',
+  '/api/ai-settings': '/api/ai-settings.js',
   '/api/admin/login': '/api/admin/login.js',
   '/api/admin/logout': '/api/admin/logout.js',
   '/api/admin/session': '/api/admin/session.js',
+  '/api/admin/ai-settings': '/api/admin/ai-settings.js',
 }
 
 const apiDevMiddleware = () => ({
