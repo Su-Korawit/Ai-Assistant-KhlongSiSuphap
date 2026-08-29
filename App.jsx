@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Send, Loader2, ArrowRight, AlertCircle, Trash2, CheckCircle2, Save } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Send, Loader2, ArrowRight, AlertCircle, AlertTriangle, Trash2, CheckCircle2, Save } from 'lucide-react';
+import { BAHT_SCHEME } from './klongRules.js';
+import { validateKlong } from './klongValidator.js';
 
 // --- Styles Injection ---
 // Inject Google Fonts and Custom Utility Classes for Pixel Art Aesthetic
@@ -73,261 +75,156 @@ const Styles = () => (
       border: 2px solid var(--c-charcoal);
       box-shadow: 2px 2px 0px var(--c-charcoal);
     }
+
+    .syllable-slot {
+      width: 3.25rem;
+    }
+    .syllable-input {
+      width: 100%;
+      text-align: center;
+      padding: 0.5rem 0.25rem;
+    }
+    .syllable-input.status-ok { border-color: var(--c-sage) !important; background-color: rgba(122,158,126,0.1); }
+    .syllable-input.status-bad { border-color: var(--c-brick) !important; background-color: rgba(192,57,43,0.08); }
+    .rhyme-underline { height: 3px; margin-top: 2px; }
+    .rhyme-underline.ok { background-color: var(--c-sage); }
+    .rhyme-underline.warn { background-color: var(--c-gold); }
+    .rhyme-underline.bad { background-color: var(--c-brick); }
   `}} />
 );
 
-// --- Helper Functions ---
+// --- Empty poem state ---
 
-/**
- * splitThaiSyllables(text)
- * Splits Thai text into syllables (พยางค์). Whitespace is ignored.
- *
- * Thai Syllable Regex Structure:
- *   [เแโใไ]?                    (A) Optional LEADING VOWEL (U+0E40–U+0E44): เ แ โ ใ ไ
- *   [ก-ฮ]                       (B) Required ONSET CONSONANT (U+0E01–U+0E2E)
- *   [ก-ฮ]?                      (C) Optional CLUSTER consonant (กร กล กว etc.)
- *   [\u0E31\u0E34-\u0E3A\u0E47]? (D) Optional ABOVE/BELOW VOWEL or mai tai khu:
- *                                    ั(0E31)  ิีึืุู(0E34-39)  ฺ(0E3A)  ็(0E47)
- *   [\u0E48-\u0E4B]?            (E) Optional TONE MARK: ่ ้ ๊ ๋ (0E48–0E4B)
- *   [\u0E30\u0E32\u0E33]?       (F) Optional TRAILING VOWEL: ะ(0E30)  า(0E32)  ำ(0E33)
- *   [ก-ฮ]?                      (G) Optional FINAL CONSONANT (ตัวสะกด)
- *   \u0E4C?                     (H) Optional SILENT MARK ์ thanthakhat (0E4C)
- */
-const splitThaiSyllables = (text) => {
-  if (!text) return [];
-  const cleaned = text.replace(/\s+/g, '');
-  if (!cleaned) return [];
-
-  const regex = new RegExp(
-    '[เแโใไ]?' +                       // (A) leading vowel
-    '[ก-ฮ]' +                          // (B) onset consonant
-    '[ก-ฮ]?' +                         // (C) optional cluster consonant
-    '[\u0E31\u0E34-\u0E3A\u0E47]?' +   // (D) above/below vowel diacritic / ็
-    '[\u0E48-\u0E4B]?' +               // (E) tone mark
-    '[\u0E30\u0E32\u0E33]?' +          // (F) trailing vowel (ะ า ำ)
-    '[ก-ฮ]?' +                         // (G) final consonant
-    '\u0E4C?',                         // (H) silent mark ์
-    'g'
-  );
-
-  const matches = cleaned.match(regex);
-  return matches ? matches.filter(m => m.length > 0) : cleaned.split('');
-};
-
-const countThaiSyllables = (text) => splitThaiSyllables(text).length;
-
-/**
- * isDeadWord(syllable)
- * Returns true if the syllable is คำตาย (a dead word).
- *
- * Rule 1 — Ends with a dead-stop FINAL CONSONANT (ตัวสะกด):
- *   แม่กก (/k/ unreleased stop): ก ข ค ฆ
- *   แม่กบ (/p/ unreleased stop): บ ป พ ฟ ภ
- *   แม่กด (/t/ unreleased stop): ด ต ถ ท ธ  ฎ ฏ ฐ ฑ ฒ  จ ช ซ ศ ษ ส
- *
- * Rule 2 — Has a SHORT VOWEL with NO final consonant:
- *   ะ (U+0E30)  ิ (U+0E34)  ึ (U+0E36)  ุ (U+0E38)  ็ (U+0E47)
- *
- * Silent consonants (การันต์: consonant + ์) are stripped before analysis.
- */
-const isDeadWord = (syllable) => {
-  if (!syllable) return false;
-
-  // Dead-stop final consonant sets
-  const DEAD_FINALS = new Set([
-    'ก','ข','ค','ฆ',                // แม่กก (/k/)
-    'บ','ป','พ','ฟ','ภ',             // แม่กบ (/p/)
-    'ด','ต','ถ','ท','ธ',             // แม่กด (/t/) — common
-    'ฎ','ฏ','ฐ','ฑ','ฒ',             // แม่กด — archaic letters
-    'จ','ช','ซ','ศ','ษ','ส',         // แม่กด — sibilants used as finals
-  ]);
-
-  // Short vowels that signal dead word when no final consonant follows
-  const SHORT_VOWEL_RE = /[\u0E30\u0E34\u0E36\u0E38\u0E47]/; // ะ ิ ึ ุ ็
-
-  // Strip silent (การันต์) consonants: [consonant]์ is unpronounced
-  const cleaned = syllable.replace(/[ก-ฮ]\u0E4C/g, '');
-
-  const allConsonants = cleaned.match(/[ก-ฮ]/g) || [];
-  const hasLeadingVowel  = /^[เแโใไ]/.test(cleaned);
-  const endsWithConsonant = /[ก-ฮ]$/.test(cleaned);
-
-  if (endsWithConsonant) {
-    // Single consonant preceded by a leading vowel (e.g. "เก", "โน", "ใน"):
-    // The consonant IS the onset — no final consonant present → not dead via Rule 1
-    if (allConsonants.length === 1 && hasLeadingVowel) return false;
-
-    // Multiple consonants: the last is the final consonant (ตัวสะกด)
-    if (allConsonants.length > 1) {
-      const lastConsonant = allConsonants[allConsonants.length - 1];
-      return DEAD_FINALS.has(lastConsonant);
-    }
-  }
-
-  // No identifiable final consonant → apply Rule 2: short vowel = dead
-  return SHORT_VOWEL_RE.test(cleaned);
-};
-
-/**
- * isEk(syllable)
- * Returns true if syllable satisfies the เอก tone requirement in โคลง poetry.
- * Accepts: ไม้เอก (่ U+0E48)  OR  คำตาย (dead word) as a valid เอก substitute.
- */
-const isEk = (syllable) => {
-  if (!syllable) return false;
-  return syllable.includes('\u0E48') || isDeadWord(syllable);
-};
-
-/**
- * isTho(syllable)
- * Returns true if syllable satisfies the โท tone requirement in โคลง poetry.
- * Accepts: ไม้โท (้ U+0E49) only.
- */
-const isTho = (syllable) => {
-  if (!syllable) return false;
-  return syllable.includes('\u0E49');
-};
-
-// --- Constants ---
-
-const BAAT_CONFIG = [
-  { id: 1, label: '๑', front: { target: 5, ek: [5], tho: [4] }, back: { target: 2, ek: [], tho: [], soi: true } },
-  { id: 2, label: '๒', front: { target: 5, ek: [5], tho: [4] }, back: { target: 2, ek: [2], tho: [], soi: false } },
-  { id: 3, label: '๓', front: { target: 5, ek: [5], tho: [4] }, back: { target: 2, ek: [2], tho: [], soi: true } },
-  { id: 4, label: '๔', front: { target: 5, ek: [5], tho: [4] }, back: { target: 4, ek: [4], tho: [], soi: false } },
-];
+const createEmptyWords = () => BAHT_SCHEME.map(b => Array(b.wordCount).fill(''));
 
 // --- Sub-components ---
 
-const SyllableBar = ({ count, expected }) => {
-  const isCorrect = count === expected;
-  return (
-    <div className={`inline-flex items-center justify-center px-2 py-0.5 text-[13px] font-bold ${
-      isCorrect 
-        ? 'bg-[#7A9E7E] text-white badge-pixel' 
-        : 'bg-[#E5E5E5] text-[#737373] border-2 border-[#A3A3A3]'
-    }`}>
-      {count}/{expected} พยางค์
-    </div>
-  );
-};
+const SyllableSlot = ({ bahtIndex, pos, value, onChange, toneMap, rhymeMap }) => {
+  const key = `${bahtIndex}-${pos}`;
+  const baht = BAHT_SCHEME[bahtIndex];
+  const isEkPos = baht.ek.includes(pos);
+  const isThoPos = baht.tho.includes(pos);
+  const toneOk = toneMap.get(key); // undefined = not required or not yet filled
+  const rhymeConfidence = rhymeMap.get(key); // undefined = not a rhyme position or not yet filled
 
-const ToneIndicator = ({ targetPos, targetType, currentWord }) => {
-  let isCorrect = false;
-  let hasWord = !!currentWord;
-
-  if (hasWord) {
-    if (targetType === 'เอก') isCorrect = isEk(currentWord);
-    if (targetType === 'โท') isCorrect = isTho(currentWord);
+  let statusClass = '';
+  if ((isEkPos || isThoPos) && value.trim()) {
+    statusClass = toneOk ? 'status-ok' : 'status-bad';
   }
 
-  // Determine styles based on Design.md
-  let chipClass = 'bg-[#FAF4E8] border-[#A3A3A3] text-[#737373]'; // Default / Empty
-  
-  if (hasWord) {
-    if (isCorrect) {
-      if (targetType === 'เอก') {
-        chipClass = 'bg-[#7A9E7E]/10 border-[#7A9E7E]/40 text-[#5A7A5E] font-bold';
-      } else {
-        chipClass = 'bg-[#D4AF37]/20 border-[#D4AF37]/50 text-[#997300] font-bold';
-      }
-    } else {
-      chipClass = 'bg-[#C0392B]/10 border-[#C0392B]/40 text-[#C0392B]';
-    }
-  }
+  let underlineClass = '';
+  if (rhymeConfidence === 'EXACT' || rhymeConfidence === 'LIKELY') underlineClass = 'ok';
+  else if (rhymeConfidence === 'UNCERTAIN') underlineClass = 'warn';
+  else if (rhymeConfidence === 'NO_MATCH') underlineClass = 'bad';
 
   return (
-    <div className={`flex flex-col items-center justify-center min-w-[32px] px-1.5 py-1 border-[2px] font-body text-xs relative ${chipClass}`}>
-      <span className="font-bold">{targetPos}</span>
-      <span className="text-[10px] absolute -bottom-2.5 bg-white px-1 leading-none border border-[#2C2C2C]">
-        {targetType}
+    <div className="syllable-slot flex flex-col items-center gap-1">
+      <span className="text-[10px] font-bold text-[#997300] h-3">
+        {isEkPos ? 'เอก' : isThoPos ? 'โท' : ''}
       </span>
+      <input
+        type="text"
+        maxLength={12}
+        className={`syllable-input input-pixel text-sm font-medium ${statusClass}`}
+        value={value}
+        onChange={(e) => onChange(pos, e.target.value)}
+        aria-label={`${baht.label} คำที่ ${pos}`}
+      />
+      <div className={`rhyme-underline w-full ${underlineClass}`} />
+      <span className="text-[10px] text-[#A3A3A3]">{pos}</span>
     </div>
   );
 };
 
-// --- Main Components ---
+const BahtRow = ({ bahtIndex, words, onChangeWord, toneMap, rhymeMap }) => {
+  const baht = BAHT_SCHEME[bahtIndex];
+  const positions = Array.from({ length: baht.wordCount }, (_, i) => i + 1);
+
+  return (
+    <div className="card-pixel flex flex-col">
+      <div className="bg-[#7A9E7E] text-white font-heading font-bold px-4 py-2 border-b-[3px] border-[#2C2C2C] text-lg">
+        {baht.label}
+      </div>
+      <div className="p-5 md:p-6 flex flex-wrap gap-3 bg-[#FAF4E8]">
+        {positions.map((pos) => (
+          <React.Fragment key={pos}>
+            <SyllableSlot
+              bahtIndex={bahtIndex}
+              pos={pos}
+              value={words[pos - 1] || ''}
+              onChange={onChangeWord}
+              toneMap={toneMap}
+              rhymeMap={rhymeMap}
+            />
+            {pos === baht.vakSplit && pos !== baht.wordCount && (
+              <div className="w-2" aria-hidden="true" />
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const ValidationSummary = ({ validation }) => {
+  if (!validation.complete) {
+    const { filledSlots, totalSlots } = validation.checks.structure;
+    return (
+      <div className="flex items-center gap-2 p-3 bg-[#E5E5E5] text-[#737373] border-2 border-[#A3A3A3] font-body text-sm font-bold">
+        พิมพ์แล้ว {filledSlots}/{totalSlots} คำ
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className={`flex items-center gap-2 p-3 border-[3px] font-body font-bold text-sm ${
+        validation.valid
+          ? 'bg-[#7A9E7E]/10 border-[#7A9E7E] text-[#5A7A5E]'
+          : 'bg-[#C0392B]/10 border-[#C0392B] text-[#C0392B]'
+      }`}>
+        {validation.valid ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertCircle className="w-5 h-5 shrink-0" />}
+        {validation.valid ? `ถูกต้องตามฉันทลักษณ์ (คะแนน ${validation.score})` : `พบข้อผิดพลาด ${validation.errors.length} จุด (คะแนน ${validation.score})`}
+      </div>
+      {validation.errors.map((e, i) => (
+        <div key={`err-${i}`} className="flex items-start gap-2 p-2 bg-[#C0392B]/5 text-[#C0392B] text-xs font-body font-bold">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> {e.message}
+        </div>
+      ))}
+      {validation.warnings.map((w, i) => (
+        <div key={`warn-${i}`} className="flex items-start gap-2 p-2 bg-[#D4AF37]/10 text-[#997300] text-xs font-body font-bold">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {w.message}
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const AIAssistant = ({ onGenerated, markComplete }) => {
   const [topic, setTopic] = useState('');
-  const [status, setStatus] = useState('idle'); 
-  const [poemLines, setPoemLines] = useState([]);
+  const [status, setStatus] = useState('idle');
+  const [result, setResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
 
   const handleGenerate = async () => {
     if (!topic.trim()) return;
-    
+
     setStatus('loading');
     setErrorMsg('');
-    
+
     try {
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey) throw new Error('ไม่พบ VITE_GEMINI_API_KEY ใน .env');
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      
-      const prompt = `ทำหน้าที่เป็นกวีเอกผู้เชี่ยวชาญด้านภาษาไทยและฉันทลักษณ์
-จงแต่งโคลงสี่สุภาพ 1 บท (4 บาท) ในหัวข้อ: "${topic}"
-
-กฎและข้อบังคับฉันทลักษณ์ที่ต้องปฏิบัติตามอย่างเคร่งครัด:
-1. โครงสร้างและจำนวนพยางค์: 
-   - บาทที่ 1 ถึง 3: วรรคหน้า 5 พยางค์ เว้นวรรค แล้วตามด้วยวรรคหลัง 2 พยางค์
-   - บาทที่ 4: วรรคหน้า 5 พยางค์ เว้นวรรค แล้วตามด้วยวรรคหลัง 4 พยางค์
-2. บังคับตำแหน่ง เอก-โท: ต้องมีคำเอก 7 แห่ง และ คำโท 4 แห่ง ตรงตามฉันทลักษณ์ (อนุญาตให้ใช้ "คำตาย" แทนคำเอกได้)
-3. สัมผัสบังคับ: ตรวจสอบการส่งและรับสัมผัสสระระหว่างบาทให้ถูกต้องตามแบบแผน
-
-ข้อสำคัญ: 
-- ให้นับ "พยางค์ที่ออกเสียง" จริงๆ ไม่ใช่นับแค่จำนวนคำ
-- คั่นระหว่างวรรคหน้าและวรรคหลังด้วย "ช่องว่าง 1 เคาะ" เพื่อให้ระบบนำไปประมวลผลต่อได้
-
-ตอบกลับมาเป็น JSON format เท่านั้น ห้ามมีข้อความอธิบาย, ห้ามมี Markdown (ไม่ต้องมี \`\`\`json) ให้แสดงแค่โครงสร้างดังนี้:
-{
-  "lines": [
-    "วรรคหน้าบาทที่๑ วรรคหลังบาทที่๑",
-    "วรรคหน้าบาทที่๒ วรรคหลังบาทที่๒",
-    "วรรคหน้าบาทที่๓ วรรคหลังบาทที่๓",
-    "วรรคหน้าบาทที่๔ วรรคหลังบาทที่๔"
-  ]
-}`;
-
-      let response;
-      let retries = 3;
-      while (retries > 0) {
-        try {
-          response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: { responseMimeType: "application/json" }
-            })
-          });
-          if (response.ok) break;
-        } catch (e) {
-          console.error("Fetch failed", e);
-        }
-        retries--;
-        await new Promise(r => setTimeout(r, 1000));
-      }
-
-      if (!response || !response.ok) throw new Error("ไม่สามารถเชื่อมต่อกับ AI ได้ในขณะนี้");
+      const response = await fetch('/api/generate-klong', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic: topic.trim() }),
+      });
 
       const data = await response.json();
-      const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      
-      if (!resultText) throw new Error("AI ไม่ได้ส่งข้อมูลกลับมา");
+      if (!response.ok) throw new Error(data.error || 'เกิดข้อผิดพลาดในการสร้างโคลง');
 
-      // Sanitize JSON in case AI adds markdown formatting
-      const cleanText = resultText.replace(/```json/gi, '').replace(/```/g, '').trim();
-      const parsedData = JSON.parse(cleanText);
-
-      if (parsedData.lines && parsedData.lines.length === 4) {
-        setPoemLines(parsedData.lines);
-        setStatus('success');
-        markComplete('aiAssistant');
-      } else {
-        throw new Error("รูปแบบโคลงที่ได้ไม่ถูกต้อง");
-      }
-
+      setResult(data);
+      setStatus('success');
+      markComplete('aiAssistant');
     } catch (err) {
       setStatus('error');
       setErrorMsg(err.message || 'เกิดข้อผิดพลาดในการสร้างโคลง');
@@ -335,16 +232,14 @@ const AIAssistant = ({ onGenerated, markComplete }) => {
   };
 
   const handleKeyDown = (e) => {
-    if (e.ctrlKey && e.key === 'Enter') {
-      handleGenerate();
-    }
+    if (e.ctrlKey && e.key === 'Enter') handleGenerate();
   };
 
   return (
     <section id="ผู้ช่วยทรงปัญญา" className="py-12 bg-[#D0E8F2]/40 border-b-[3px] border-[#2C2C2C]">
       <div className="max-w-2xl mx-auto px-4">
         <div className="card-pixel p-6 md:p-8">
-          
+
           <div className="text-center mb-8">
             <h2 className="font-heading font-bold text-3xl md:text-4xl text-[#2C2C2C] mb-4">
               ผู้ช่วยทรงปัญญา
@@ -370,18 +265,17 @@ const AIAssistant = ({ onGenerated, markComplete }) => {
             </button>
           </div>
 
-          {/* States */}
           {status === 'loading' && (
             <div className="space-y-4 p-6 border-[3px] border-[#2C2C2C] bg-[#FAF4E8]">
               {['w-[80%]', 'w-[65%]', 'w-[72%]', 'w-[55%]'].map((width, i) => (
-                <div 
-                  key={i} 
+                <div
+                  key={i}
                   className={`h-4 bg-[#7A9E7E]/30 animate-pulse ${width} border border-[#7A9E7E]/50`}
                   style={{ animationDelay: `${i * 200}ms`, animationDuration: '1.4s' }}
                 />
               ))}
               <p className="text-center font-body font-bold text-[#5A7A5E] pt-2 animate-pulse">
-                ระบบกำลังเรียงร้อยถ้อยคำ...
+                ระบบกำลังเรียงร้อยถ้อยคำและตรวจฉันทลักษณ์...
               </p>
             </div>
           )}
@@ -393,18 +287,26 @@ const AIAssistant = ({ onGenerated, markComplete }) => {
             </div>
           )}
 
-          {status === 'success' && (
-            <div className="bg-[#F5F0E8] p-6 border-[3px] border-[#2C2C2C]">
-              <div className="space-y-3 mb-6 font-body text-[#2C2C2C] text-lg font-medium">
-                {poemLines.map((line, idx) => (
-                  <div key={idx} className="flex gap-4">
-                    <span className="text-[#A8C5A0] font-bold select-none">{idx + 1}.</span>
-                    <p>{line}</p>
-                  </div>
-                ))}
+          {status === 'success' && result && (
+            <div className="bg-[#F5F0E8] p-6 border-[3px] border-[#2C2C2C] space-y-4">
+              <div className="space-y-3 font-body text-[#2C2C2C] text-lg font-medium">
+                {result.baht.map((row, idx) => {
+                  const vakSplit = BAHT_SCHEME[idx].vakSplit;
+                  return (
+                    <div key={idx} className="flex gap-4">
+                      <span className="text-[#A8C5A0] font-bold select-none">{idx + 1}.</span>
+                      <p>{row.slice(0, vakSplit).join('')} {row.slice(vakSplit).join('')}</p>
+                    </div>
+                  );
+                })}
               </div>
+              {!result.validation.valid && (
+                <p className="text-xs font-body font-bold text-[#997300]">
+                  หมายเหตุ: ระบบพยายามแก้ไข {result.attempts} ครั้ง ยังมีจุดที่ไม่สมบูรณ์ — แก้ไขเพิ่มเติมได้ในตัวแก้ไขด้านล่าง
+                </p>
+              )}
               <button
-                onClick={() => onGenerated(poemLines)}
+                onClick={() => onGenerated(result.baht)}
                 className="w-full btn-pixel btn-secondary py-3 px-4 font-bold text-lg"
               >
                 นำไปแก้ไขใน KlongEditor <ArrowRight className="w-5 h-5" />
@@ -418,202 +320,80 @@ const AIAssistant = ({ onGenerated, markComplete }) => {
   );
 };
 
-
-const ClauseEditor = ({ type, config, value, onChange }) => {
-  // splitThaiSyllables strips all whitespace before matching, so spaces the
-  // user types for readability are never counted as syllables.
-  // `syllables` is a pure array of Thai syllable strings, e.g. ["สาย","น้ำ","ไหล","รื่น","รมย์"]
-  const syllables = splitThaiSyllables(value);
-  const count = syllables.length;
-
-  // Build tone requirement list from config positions (1-indexed)
-  const toneReqs = [];
-  if (config.ek) config.ek.forEach(pos => toneReqs.push({ pos, type: 'เอก' }));
-  if (config.tho) config.tho.forEach(pos => toneReqs.push({ pos, type: 'โท' }));
-  toneReqs.sort((a, b) => a.pos - b.pos);
-
-  // Resolve the actual syllable string at a 1-indexed position.
-  // Returns '' when the user hasn't typed that far yet — ToneIndicator
-  // treats '' as "empty" and renders the neutral state.
-  const syllableAt = (pos) => syllables[pos - 1] ?? '';
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="relative">
-        <input
-          type="text"
-          className="w-full px-4 py-3 input-pixel text-lg font-medium"
-          placeholder={`วรรค${type} (${config.target} คำ)`}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-        {config.soi && (
-          <span className="absolute right-3 top-3.5 text-xs text-[#737373] italic font-body pointer-events-none">
-            (คำสร้อย)
-          </span>
-        )}
-      </div>
-      
-      <div className="flex flex-wrap items-center gap-4 pl-1">
-        <SyllableBar count={count} expected={config.target} />
-        
-        {toneReqs.length > 0 && (
-          <div className="flex gap-2 items-center">
-            <span className="text-xs font-bold text-[#737373] mr-1">บังคับ:</span>
-            {toneReqs.map((req, idx) => (
-              <ToneIndicator 
-                key={idx} 
-                targetPos={req.pos} 
-                targetType={req.type} 
-                currentWord={syllableAt(req.pos)} 
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-
-const KlongEditor = ({ prefillLines, markComplete }) => {
-  const [clauses, setClauses] = useState(
-    Array(4).fill({ front: '', back: '' })
-  );
+const KlongEditor = ({ prefillBaht, markComplete }) => {
+  const [words, setWords] = useState(createEmptyWords());
 
   useEffect(() => {
-    if (prefillLines && prefillLines.length === 4) {
-      const newClauses = prefillLines.map(line => {
-        const parts = line.trim().split(/\s{2,}|\s+/);
-        return {
-          front: parts[0] || '',
-          back: parts.slice(1).join(' ') || ''
-        };
-      });
-      setClauses(newClauses);
-      checkCompletion(newClauses);
+    if (prefillBaht && prefillBaht.length === 4) {
+      setWords(prefillBaht.map(row => [...row]));
     }
-  }, [prefillLines]);
+  }, [prefillBaht]);
 
-  const updateClause = (baatIndex, side, value) => {
-    const newClauses = [...clauses];
-    newClauses[baatIndex] = { ...newClauses[baatIndex], [side]: value };
-    setClauses(newClauses);
-    checkCompletion(newClauses);
+  const validation = useMemo(() => validateKlong(words), [words]);
+
+  const { toneMap, rhymeMap } = useMemo(() => {
+    const toneMap = new Map();
+    validation.checks.tone.forEach(t => toneMap.set(`${t.baht}-${t.pos}`, t.ok));
+    const rhymeMap = new Map();
+    validation.checks.rhyme.forEach(r => {
+      r.group.forEach(g => rhymeMap.set(`${g.baht}-${g.pos}`, r.confidence));
+    });
+    return { toneMap, rhymeMap };
+  }, [validation]);
+
+  useEffect(() => {
+    if (validation.valid) markComplete('klongEditor');
+  }, [validation.valid]);
+
+  const updateWord = (bahtIndex, pos, value) => {
+    setWords(prev => {
+      const next = prev.map(row => [...row]);
+      next[bahtIndex][pos - 1] = value;
+      return next;
+    });
   };
 
   const clearAll = () => {
-    if(confirm('คุณแน่ใจหรือไม่ที่จะล้างข้อความทั้งหมด?')) {
-      setClauses(Array(4).fill({ front: '', back: '' }));
-    }
-  };
-
-  const [isAllValid, setIsAllValid] = useState(false);
-
-  const checkCompletion = (currentClauses) => {
-    let allValid = true;
-
-    currentClauses.forEach((clause, index) => {
-      const config = BAAT_CONFIG[index];
-
-      // --- 1. Syllable count validation ---
-      const frontSyllables = splitThaiSyllables(clause.front);
-      const backSyllables  = splitThaiSyllables(clause.back);
-      const fCount = frontSyllables.length;
-      const bCount = backSyllables.length;
-
-      if (fCount !== config.front.target) allValid = false;
-
-      // Back clause: accept exact target, OR target+2 when soi (คำสร้อย) is allowed
-      const backCountOk = bCount === config.back.target ||
-        (config.back.soi && bCount === config.back.target + 2);
-      if (!backCountOk) allValid = false;
-
-      // --- 2. Tone mark validation (เอก / โท) ---
-      // Front clause — iterate required เอก positions
-      config.front.ek.forEach(pos => {
-        const syllable = frontSyllables[pos - 1] ?? '';
-        if (!isEk(syllable)) allValid = false;
-      });
-      // Front clause — iterate required โท positions
-      config.front.tho.forEach(pos => {
-        const syllable = frontSyllables[pos - 1] ?? '';
-        if (!isTho(syllable)) allValid = false;
-      });
-
-      // Back clause — iterate required เอก positions
-      config.back.ek.forEach(pos => {
-        const syllable = backSyllables[pos - 1] ?? '';
-        if (!isEk(syllable)) allValid = false;
-      });
-      // Back clause — iterate required โท positions
-      config.back.tho.forEach(pos => {
-        const syllable = backSyllables[pos - 1] ?? '';
-        if (!isTho(syllable)) allValid = false;
-      });
-    });
-
-    setIsAllValid(allValid);
-    if (allValid) {
-      markComplete('klongEditor');
+    if (confirm('คุณแน่ใจหรือไม่ที่จะล้างข้อความทั้งหมด?')) {
+      setWords(createEmptyWords());
     }
   };
 
   return (
     <section id="แต่งโคลง" className="py-12 bg-[#F5F0E8] min-h-screen">
       <div className="max-w-4xl mx-auto px-4">
-        
+
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
           <div>
             <h2 className="font-heading font-bold text-3xl md:text-4xl text-[#2C2C2C]">
               แต่งโคลงด้วยตนเอง
             </h2>
-            <p className="font-body text-[#5A7A5E] font-bold mt-2 text-lg">แก้ไขและตรวจสอบฉันทลักษณ์โคลงสี่สุภาพ</p>
+            <p className="font-body text-[#5A7A5E] font-bold mt-2 text-lg">พิมพ์ทีละคำ ระบบตรวจเอก-โท-สัมผัสให้ทันที</p>
           </div>
           <div className="flex gap-3">
-            <button 
-              onClick={clearAll}
-              className="btn-pixel btn-danger px-4 py-2 text-sm"
-            >
-              <Trash2 className="w-4 h-4" />
-              ล้างข้อมูล
+            <button onClick={clearAll} className="btn-pixel btn-danger px-4 py-2 text-sm">
+              <Trash2 className="w-4 h-4" /> ล้างข้อมูล
             </button>
-            <button 
-              disabled={!isAllValid}
-              className="btn-pixel btn-primary px-5 py-2 text-sm"
-            >
-              <Save className="w-4 h-4" />
-              บันทึก
+            <button disabled={!validation.valid} className="btn-pixel btn-primary px-5 py-2 text-sm">
+              <Save className="w-4 h-4" /> บันทึก
             </button>
           </div>
         </div>
 
+        <div className="mb-6">
+          <ValidationSummary validation={validation} />
+        </div>
+
         <div className="space-y-8">
-          {BAAT_CONFIG.map((baat, index) => (
-            <div key={baat.id} className="card-pixel flex flex-col">
-              
-              {/* Title Bar */}
-              <div className="bg-[#7A9E7E] text-white font-heading font-bold px-4 py-2 border-b-[3px] border-[#2C2C2C] text-lg flex items-center gap-2">
-                บาทที่ {baat.label}
-              </div>
-
-              {/* Clauses Container */}
-              <div className="p-5 md:p-6 grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 bg-[#FAF4E8]">
-                <ClauseEditor 
-                  type="หน้า"
-                  config={baat.front}
-                  value={clauses[index].front}
-                  onChange={(val) => updateClause(index, 'front', val)}
-                />
-                <ClauseEditor 
-                  type="หลัง"
-                  config={baat.back}
-                  value={clauses[index].back}
-                  onChange={(val) => updateClause(index, 'back', val)}
-                />
-              </div>
-
-            </div>
+          {BAHT_SCHEME.map((baht, index) => (
+            <BahtRow
+              key={index}
+              bahtIndex={index}
+              words={words[index]}
+              onChangeWord={(pos, value) => updateWord(index, pos, value)}
+              toneMap={toneMap}
+              rhymeMap={rhymeMap}
+            />
           ))}
         </div>
 
@@ -625,7 +405,7 @@ const KlongEditor = ({ prefillLines, markComplete }) => {
 // --- App Container ---
 
 export default function App() {
-  const [generatedPoem, setGeneratedPoem] = useState(null);
+  const [generatedBaht, setGeneratedBaht] = useState(null);
   const [progress, setProgress] = useState({
     aiAssistant: false,
     klongEditor: false
@@ -635,8 +415,8 @@ export default function App() {
     setProgress(prev => ({ ...prev, [section]: true }));
   };
 
-  const handlePoemGenerated = (lines) => {
-    setGeneratedPoem(lines);
+  const handlePoemGenerated = (baht) => {
+    setGeneratedBaht(baht);
     setTimeout(() => {
       document.getElementById('แต่งโคลง')?.scrollIntoView({ behavior: 'smooth' });
     }, 100);
@@ -646,7 +426,6 @@ export default function App() {
     <div className="font-body text-[#2C2C2C] selection:bg-[#A8C5A0] selection:text-[#2C2C2C] min-h-screen flex flex-col">
       <Styles />
 
-      {/* Navbar/Header */}
       <header className="bg-[#FAF4E8] border-b-[3px] border-[#2C2C2C] sticky top-0 z-50">
         <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
           <h1 className="font-heading font-bold text-2xl tracking-tight text-[#2C2C2C] flex items-center gap-2">
@@ -664,16 +443,16 @@ export default function App() {
       </header>
 
       <main className="flex-1">
-        <AIAssistant 
-          onGenerated={handlePoemGenerated} 
-          markComplete={completeSection} 
+        <AIAssistant
+          onGenerated={handlePoemGenerated}
+          markComplete={completeSection}
         />
-        <KlongEditor 
-          prefillLines={generatedPoem} 
+        <KlongEditor
+          prefillBaht={generatedBaht}
           markComplete={completeSection}
         />
       </main>
-      
+
       <footer className="bg-[#2C2C2C] text-[#F5F0E8] py-6 border-t-[3px] border-[#2C2C2C]">
         <div className="max-w-4xl mx-auto px-4 text-center font-body text-sm font-medium">
           <p>กวีAI — ถักทอตัวอักษร ซ่อนเงาศิลป์</p>
