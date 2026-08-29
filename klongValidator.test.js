@@ -68,6 +68,36 @@ describe('validateKlong — เอก/โท', () => {
     const result = validateKlong(poem);
     expect(result.errors.some(e => e.baht === 0 && e.pos === 4)).toBe(false);
   });
+
+  describe('เอกโทษ/โทโทษ (allowTonePenalty option)', () => {
+    it('by default (no options), a ไม้โท word at a เอก slot still fails', () => {
+      const poem = clone(VALID_POEM);
+      poem[0][3] = 'น้ำ'; // บาท1 คำ4 needs เอก — น้ำ is ไม้โท
+      const result = validateKlong(poem);
+      expect(result.errors.some(e => e.code === 'TONE_EK_FAIL' && e.baht === 0 && e.pos === 4)).toBe(true);
+    });
+
+    it('with { allowTonePenalty: true }, a ไม้โท word at a เอก slot is accepted (เอกโทษ)', () => {
+      const poem = clone(VALID_POEM);
+      poem[0][3] = 'น้ำ';
+      const result = validateKlong(poem, { allowTonePenalty: true });
+      expect(result.errors.some(e => e.baht === 0 && e.pos === 4)).toBe(false);
+    });
+
+    it('with { allowTonePenalty: true }, a ไม้เอก word at a โท slot is accepted (โทโทษ)', () => {
+      const poem = clone(VALID_POEM);
+      poem[0][4] = 'ไม่'; // บาท1 คำ5 needs โท — ไม่ is ไม้เอก
+      const result = validateKlong(poem, { allowTonePenalty: true });
+      expect(result.errors.some(e => e.baht === 0 && e.pos === 5)).toBe(false);
+    });
+
+    it('the option does not affect rhyme or MULTI_SYLLABLE checks', () => {
+      const bad = clone(VALID_POEM);
+      bad[2][4] = 'มี'; // breaks rhyme regardless
+      const result = validateKlong(bad, { allowTonePenalty: true });
+      expect(result.errors.some(e => e.code === 'RHYME_FAIL')).toBe(true);
+    });
+  });
 });
 
 describe('validateKlong — rhyme', () => {

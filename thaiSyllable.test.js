@@ -101,6 +101,26 @@ describe('isEk / isTho', () => {
     expect(isTho('น้ำ')).toBe(true);
     expect(isTho('รัก')).toBe(false); // dead word is NOT a valid โท substitute
   });
+
+  describe('เอกโทษ/โทโทษ (allowTonePenalty)', () => {
+    it('without the flag, a ไม้โท word at a เอก slot and a ไม้เอก word at a โท slot are both rejected (unchanged default)', () => {
+      expect(isEk('น้ำ')).toBe(false); // ไม้โท, not เอก and not a dead word
+      expect(isTho('ไม่')).toBe(false); // ไม้เอก, not โท
+    });
+
+    it('เอกโทษ: with the flag, isEk also accepts ไม้โท', () => {
+      expect(isEk('น้ำ', true)).toBe(true);
+    });
+
+    it('โทโทษ: with the flag, isTho also accepts ไม้เอก', () => {
+      expect(isTho('ไม่', true)).toBe(true);
+    });
+
+    it('the flag does not loosen anything else — a bare-tone word is still rejected', () => {
+      expect(isEk('มา', true)).toBe(false);
+      expect(isTho('มา', true)).toBe(false);
+    });
+  });
 });
 
 describe('rhyme (สัมผัสสระ)', () => {

@@ -215,23 +215,40 @@ export const isDeadWord = (syllable) => {
 };
 
 /**
- * isEk(syllable)
+ * isEk(syllable, allowTonePenalty)
  * Returns true if syllable satisfies the เอก tone requirement in โคลง poetry.
  * Accepts: ไม้เอก (่ U+0E48)  OR  คำตาย (dead word) as a valid เอก substitute.
+ *
+ * `allowTonePenalty` (default false) additionally accepts ไม้โท — the
+ * เอกโทษ poetic license, traditionally invoked when no correctly-เอก-marked
+ * word fits the line's meaning. This only relaxes the *tone-mark* check;
+ * it can't verify the traditional precondition (that no properly-เอก word
+ * existed for the meaning) — that's a lexical/semantic judgment call, out
+ * of scope for a mark-based checker, so it's offered as an explicit
+ * opt-in rather than silently applied.
  */
-export const isEk = (syllable) => {
+export const isEk = (syllable, allowTonePenalty = false) => {
   if (!syllable) return false;
-  return syllable.includes('่') || isDeadWord(syllable);
+  if (syllable.includes('่')) return true;
+  if (allowTonePenalty && syllable.includes('้')) return true;
+  return isDeadWord(syllable);
 };
 
 /**
- * isTho(syllable)
+ * isTho(syllable, allowTonePenalty)
  * Returns true if syllable satisfies the โท tone requirement in โคลง poetry.
- * Accepts: ไม้โท (้ U+0E49) only.
+ * Accepts: ไม้โท (้ U+0E49) only — a dead word is NOT a valid โท substitute
+ * (that license only applies to เอก).
+ *
+ * `allowTonePenalty` (default false) additionally accepts ไม้เอก — the
+ * โทโทษ poetic license, the โท-side mirror of เอกโทษ above (same scope
+ * caveat: mark-only, not a check that no properly-โท word existed).
  */
-export const isTho = (syllable) => {
+export const isTho = (syllable, allowTonePenalty = false) => {
   if (!syllable) return false;
-  return syllable.includes('้');
+  if (syllable.includes('้')) return true;
+  if (allowTonePenalty && syllable.includes('่')) return true;
+  return false;
 };
 
 // --- Rhyme (สัมผัสสระ) ---

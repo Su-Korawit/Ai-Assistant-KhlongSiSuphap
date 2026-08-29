@@ -10,9 +10,15 @@ const CONFIDENCE_ORDER = { EXACT: 0, LIKELY: 1, UNCERTAIN: 2, NO_MATCH: 3 };
 const THAI_ONLY_RE = /^[ก-ฮเแโใไะ-๋]+$/;
 
 /**
- * validateKlong(words)
+ * validateKlong(words, options)
  * words: string[4][] — words[bahtIndex][posIndex] (0-indexed), one Thai
  * word/syllable per slot. Missing/未-filled slots may be '' or undefined.
+ *
+ * `options.allowTonePenalty` (default false): applies the เอกโทษ/โทโทษ
+ * poetic license (see isEk/isTho in thaiSyllable.js) to every เอก/โท check
+ * below — a เอก slot also accepts ไม้โท, a โท slot also accepts ไม้เอก.
+ * Off by default because it's a real loosening of correctness, not a bug
+ * fix; callers opt in explicitly (validator_settings toggle, once wired).
  *
  * Deterministic: this is the sole authority on structure, เอก/โท, and
  * rhyme-position correctness. Never overridden by the AI (Rule 3). Shared
@@ -27,7 +33,8 @@ const THAI_ONLY_RE = /^[ก-ฮเแโใไะ-๋]+$/;
  * - `score`: null until complete (correctness isn't measurable on a
  *   partial poem); otherwise 0-100 weighted across tone + rhyme checks.
  */
-export function validateKlong(words) {
+export function validateKlong(words, options = {}) {
+  const { allowTonePenalty = false } = options;
   const errors = [];
   const warnings = [];
   const toneChecks = [];
@@ -57,7 +64,7 @@ export function validateKlong(words) {
       if (!word) continue; // not yet typed — not an error, just incomplete
 
       if (isEkPos) {
-        const ok = isEk(word);
+        const ok = isEk(word, allowTonePenalty);
         toneChecks.push({ baht: b, pos, type: 'เอก', word, ok });
         if (!ok) {
           errors.push({
@@ -66,7 +73,7 @@ export function validateKlong(words) {
           });
         }
       } else {
-        const ok = isTho(word);
+        const ok = isTho(word, allowTonePenalty);
         toneChecks.push({ baht: b, pos, type: 'โท', word, ok });
         if (!ok) {
           errors.push({
