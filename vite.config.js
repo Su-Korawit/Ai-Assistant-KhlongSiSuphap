@@ -7,6 +7,7 @@ import react from '@vitejs/plugin-react'
 const API_ROUTES = {
   '/api/generate-klong': '/api/generate-klong.js',
   '/api/ai-settings': '/api/ai-settings.js',
+  '/api/validator-settings': '/api/validator-settings.js',
   '/api/admin/login': '/api/admin/login.js',
   '/api/admin/logout': '/api/admin/logout.js',
   '/api/admin/session': '/api/admin/session.js',

@@ -316,7 +316,7 @@ const AIAssistant = ({ onGenerated, markComplete, initialTopic, onTopicApplied }
   );
 };
 
-const KlongEditor = ({ prefillBaht, markComplete }) => {
+const KlongEditor = ({ prefillBaht, markComplete, allowTonePenalty }) => {
   const [words, setWords] = useState(createEmptyWords());
 
   useEffect(() => {
@@ -325,7 +325,7 @@ const KlongEditor = ({ prefillBaht, markComplete }) => {
     }
   }, [prefillBaht]);
 
-  const validation = useMemo(() => validateKlong(words), [words]);
+  const validation = useMemo(() => validateKlong(words, { allowTonePenalty }), [words, allowTonePenalty]);
 
   const { toneMap, rhymeMap } = useMemo(() => buildToneRhymeMaps(validation), [validation]);
 
@@ -437,7 +437,7 @@ const computeLevelScore = (validation) => {
   return Math.round(toneScore + rhymeScore);
 };
 
-const Challenge = () => {
+const Challenge = ({ allowTonePenalty }) => {
   const [progress, setProgress] = useState(loadProgress);
   const [currentLevelId, setCurrentLevelId] = useState(() => {
     const p = loadProgress();
@@ -448,7 +448,7 @@ const Challenge = () => {
   const [result, setResult] = useState(null);
 
   const level = CHALLENGE_LEVELS.find((l) => l.id === currentLevelId);
-  const validation = useMemo(() => validateKlong(words), [words]);
+  const validation = useMemo(() => validateKlong(words, { allowTonePenalty }), [words, allowTonePenalty]);
   const { toneMap, rhymeMap } = useMemo(() => buildToneRhymeMaps(validation), [validation]);
 
   const switchLevel = (id) => {
@@ -668,6 +668,17 @@ export default function App() {
   });
   const [activeTab, setActiveTab] = useState('practice');
   const [selectedPrompt, setSelectedPrompt] = useState('');
+  // เอกโทษ/โทโทษ poetic license — off by default while loading, matching
+  // validator_settings' own default, so the check doesn't briefly loosen
+  // then tighten on every page load.
+  const [allowTonePenalty, setAllowTonePenalty] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/validator-settings')
+      .then((res) => res.json())
+      .then((data) => setAllowTonePenalty(Boolean(data.allow_tone_penalty)))
+      .catch(() => {});
+  }, []);
 
   const completeSection = (section) => {
     setProgress(prev => ({ ...prev, [section]: true }));
@@ -719,10 +730,11 @@ export default function App() {
           <KlongEditor
             prefillBaht={generatedBaht}
             markComplete={completeSection}
+            allowTonePenalty={allowTonePenalty}
           />
         </div>
         <div id="panel-challenge" role="tabpanel" aria-labelledby="tab-challenge" hidden={activeTab !== 'challenge'}>
-          <Challenge />
+          <Challenge allowTonePenalty={allowTonePenalty} />
         </div>
         <div id="panel-library" role="tabpanel" aria-labelledby="tab-library" hidden={activeTab !== 'library'}>
           <PromptLibrary onSelectPrompt={handleSelectPrompt} />

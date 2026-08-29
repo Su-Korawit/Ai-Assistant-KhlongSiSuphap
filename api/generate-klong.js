@@ -143,7 +143,7 @@ async function readJsonBody(req) {
 }
 
 /**
- * generateKlong(topic, apiKey, promptTemplate)
+ * generateKlong(topic, apiKey, promptTemplate, allowTonePenalty)
  * Generate → validate → (if invalid) send targeted feedback → regenerate,
  * up to MAX_REFINE_ATTEMPTS. Always returns the best-scoring attempt seen,
  * never loops unbounded (Section 15).
@@ -152,20 +152,26 @@ async function readJsonBody(req) {
  * see buildIntro's comment) — optional, falls back to the default persona
  * intro when omitted or missing a {topic} placeholder.
  *
+ * `allowTonePenalty` (validator_settings table) is forwarded to
+ * validateKlong as-is — see its own doc comment (เอกโทษ/โทโทษ). Applying it
+ * here too, not just in the live editor, keeps the AI's own accept/reject
+ * judgment of its draft consistent with whatever a human editing the same
+ * poem would see.
+ *
  * `meetsThreshold` tells the caller whether that best attempt is good
  * enough to present as a finished poem (score >= MIN_ACCEPTABLE_SCORE) —
  * the attempt and its validation are still returned either way, so the
  * caller can show the user how close it got rather than just a bare
  * failure (Rule 3: the AI never overrides validateKlong's verdict).
  */
-export async function generateKlong(topic, apiKey, promptTemplate) {
+export async function generateKlong(topic, apiKey, promptTemplate, allowTonePenalty) {
   let best = null;
   let attempts = 0;
   let baht = await callGemini(apiKey, buildPrompt(topic, promptTemplate));
 
   while (attempts < MAX_REFINE_ATTEMPTS) {
     attempts++;
-    const validation = validateKlong(baht);
+    const validation = validateKlong(baht, { allowTonePenalty });
     if (!best || (validation.score ?? -1) > (best.validation.score ?? -1)) {
       best = { baht, validation };
     }
@@ -200,6 +206,8 @@ export default async function handler(req, res) {
     return;
   }
 
+  const [validatorSettings] = await sql`select allow_tone_penalty from validator_settings where id = 1`;
+
   let body;
   try {
     body = await readJsonBody(req);
@@ -217,7 +225,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const result = await generateKlong(topic, apiKey, aiSettings?.prompt_template);
+    const result = await generateKlong(topic, apiKey, aiSettings?.prompt_template, validatorSettings?.allow_tone_penalty);
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify(result));

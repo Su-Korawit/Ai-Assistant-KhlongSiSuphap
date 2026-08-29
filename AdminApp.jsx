@@ -183,6 +183,81 @@ const AiSettingsPanel = () => {
   );
 };
 
+const ValidatorSettingsPanel = () => {
+  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    // Same endpoint the public app reads (GET is unauthenticated there
+    // too) — PUT is the only branch that needs the admin session.
+    fetch('/api/validator-settings')
+      .then((res) => res.json())
+      .then((data) => { setSettings(data); setLoading(false); })
+      .catch(() => { setError('โหลดการตั้งค่าไม่สำเร็จ'); setLoading(false); });
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const res = await fetch('/api/validator-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'บันทึกไม่สำเร็จ');
+      setSettings(data);
+      setMessage('บันทึกแล้ว');
+    } catch (err) {
+      setError(err.message || 'บันทึกไม่สำเร็จ');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--c-sage)' }} />;
+  }
+  if (!settings) {
+    return <p style={{ color: 'var(--c-brick)' }}>{error || 'โหลดการตั้งค่าไม่สำเร็จ'}</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="font-heading text-lg font-bold" style={{ color: 'var(--c-charcoal)' }}>ตัวตรวจฉันทลักษณ์</h2>
+
+      <Toggle
+        label="อนุญาตเอกโทษ/โทโทษ (สลับไม้เอก-ไม้โทได้ในตำแหน่งบังคับ)"
+        checked={settings.allow_tone_penalty}
+        onChange={(v) => setSettings({ ...settings, allow_tone_penalty: v })}
+      />
+      <p className="text-xs" style={{ color: 'var(--c-sage-dark)' }}>
+        เมื่อเปิด ตำแหน่งที่บังคับเอกจะยอมรับไม้โทได้ด้วย (เอกโทษ) และตำแหน่งที่บังคับโทจะยอมรับไม้เอกได้ด้วย (โทโทษ) — ใช้ได้ทั้งในตัวแก้ไข ด่านท้าทาย และผู้ช่วย AI
+      </p>
+
+      {error && (
+        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--c-brick)' }}>
+          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+        </div>
+      )}
+      {message && (
+        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--c-sage-dark)' }}>
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> {message}
+        </div>
+      )}
+
+      <button onClick={handleSave} className="btn-pixel btn-primary px-4 py-2" disabled={saving}>
+        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'บันทึก'}
+      </button>
+    </div>
+  );
+};
+
 const AdminDashboard = ({ username, onLoggedOut }) => {
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -207,10 +282,13 @@ const AdminDashboard = ({ username, onLoggedOut }) => {
           </button>
         </div>
       </header>
-      <main className="m-4 card-pixel p-8" style={{ color: 'var(--c-charcoal)' }}>
+      <main className="m-4 card-pixel p-8 space-y-8" style={{ color: 'var(--c-charcoal)' }}>
         <AiSettingsPanel />
-        <p className="text-xs mt-8 pt-4" style={{ color: 'var(--c-sage-dark)', borderTop: '2px solid var(--c-charcoal)' }}>
-          ด่านท้าทาย, คลังโจทย์, เอกโทษ/โทโทษ, เอกสาร Algorithm — จะมาในขั้นถัดไป
+        <div style={{ borderTop: '2px solid var(--c-charcoal)', paddingTop: '2rem' }}>
+          <ValidatorSettingsPanel />
+        </div>
+        <p className="text-xs pt-4" style={{ color: 'var(--c-sage-dark)', borderTop: '2px solid var(--c-charcoal)' }}>
+          ด่านท้าทาย, คลังโจทย์, เอกสาร Algorithm — จะมาในขั้นถัดไป
         </p>
       </main>
     </div>

@@ -84,6 +84,64 @@ describe('generateKlong — admin prompt_template override', () => {
   });
 });
 
+// Same shape as klongValidator.test.js's VALID_POEM, but บาท1 คำ4 (needs
+// เอก) is 'น้ำ' — ไม้โท, not ไม้เอก and not a dead word. Fails without the
+// เอกโทษ license, passes with it; everything else about the poem is
+// correct, so this isolates exactly the one setting under test.
+const NEEDS_TONE_PENALTY_BAHT = [
+  ['ตา', 'ตา', 'ตา', 'น้ำ', 'น้ำ', 'ตา', 'กา'],
+  ['ตา', 'จิต', 'ตา', 'ตา', 'มา', 'จบ', 'ฟ้า'],
+  ['ตา', 'ตา', 'จิต', 'ตา', 'ตา', 'ตา', 'จบ'],
+  ['ตา', 'จบ', 'ตา', 'ตา', 'หน้า', 'จบ', 'ฟ้า', 'ตา', 'ตา'],
+];
+
+describe('generateKlong — allowTonePenalty wiring', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => mockGeminiResponse(NEEDS_TONE_PENALTY_BAHT)));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('without the flag, a เอกโทษ-only-valid poem still fails TONE_EK_FAIL', async () => {
+    const result = await generateKlong('ทดสอบ', 'fake-api-key', null, false);
+    expect(result.validation.errors.some(e => e.code === 'TONE_EK_FAIL')).toBe(true);
+  });
+
+  it('with the flag, the same poem passes — generateKlong forwards it to validateKlong', async () => {
+    const result = await generateKlong('ทดสอบ', 'fake-api-key', null, true);
+    expect(result.validation.errors.some(e => e.code === 'TONE_EK_FAIL')).toBe(false);
+    expect(result.validation.valid).toBe(true);
+  });
+});
+
+describe('generate-klong handler — validator_settings.allow_tone_penalty wiring', () => {
+  beforeEach(() => {
+    sql.mockReset();
+    vi.stubEnv('GEMINI_API_KEY', 'fake-api-key');
+    vi.stubGlobal('fetch', vi.fn(async () => mockGeminiResponse(NEEDS_TONE_PENALTY_BAHT)));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reads validator_settings and passes allow_tone_penalty through to validateKlong', async () => {
+    sql
+      .mockResolvedValueOnce([{ ai_enabled: true, prompt_template: null }]) // ai_settings query
+      .mockResolvedValueOnce([{ allow_tone_penalty: true }]); // validator_settings query
+    const res = fakeRes();
+    await handler(fakeReq('POST', { topic: 'ทดสอบ' }), res);
+    const body = JSON.parse(res.body);
+    expect(body.validation.errors.some(e => e.code === 'TONE_EK_FAIL')).toBe(false);
+  });
+
+  it('defaults to strict (no penalty) when validator_settings.allow_tone_penalty is false', async () => {
+    sql
+      .mockResolvedValueOnce([{ ai_enabled: true, prompt_template: null }])
+      .mockResolvedValueOnce([{ allow_tone_penalty: false }]);
+    const res = fakeRes();
+    await handler(fakeReq('POST', { topic: 'ทดสอบ' }), res);
+    const body = JSON.parse(res.body);
+    expect(body.validation.errors.some(e => e.code === 'TONE_EK_FAIL')).toBe(true);
+  });
+});
+
 describe('generate-klong handler — ai_enabled gate', () => {
   beforeEach(() => {
     sql.mockReset();

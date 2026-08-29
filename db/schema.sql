@@ -21,10 +21,26 @@ create table if not exists ai_settings (
 
 create table if not exists validator_settings (
   id integer primary key default 1,
-  ek_toe_toe_toe_enabled boolean not null default false,
+  allow_tone_penalty boolean not null default false,
   updated_at timestamptz not null default now(),
   constraint validator_settings_singleton check (id = 1)
 );
+
+-- Migration: an earlier apply of this script (Phase 2 Step 1) used the
+-- misnamed column ek_toe_toe_toe_enabled — doesn't read as เอกโทษ/โทโทษ at
+-- all (flagged in Step 5's commit). Renamed here rather than a separate
+-- migration file, since this script is the only migration mechanism this
+-- project has; safe to re-run on any DB state (fresh installs never had
+-- the old name, so the IF EXISTS is always false for them).
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_name = 'validator_settings' and column_name = 'ek_toe_toe_toe_enabled'
+  ) then
+    alter table validator_settings rename column ek_toe_toe_toe_enabled to allow_tone_penalty;
+  end if;
+end $$;
 
 create table if not exists challenges (
   id serial primary key,
