@@ -15,6 +15,7 @@ const API_ROUTES = {
   '/api/admin/logout': '/api/admin/logout.js',
   '/api/admin/session': '/api/admin/session.js',
   '/api/admin/ai-settings': '/api/admin/ai-settings.js',
+  '/api/admin/algorithm-comments': '/api/admin/algorithm-comments.js',
 }
 
 const apiDevMiddleware = () => ({

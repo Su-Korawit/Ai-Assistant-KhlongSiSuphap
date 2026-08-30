@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, LogOut, Loader2, AlertCircle, CheckCircle2, Plus, Pencil, Trash2, X } from 'lucide-react';
+import { Lock, LogOut, Loader2, AlertCircle, CheckCircle2, Plus, Pencil, Trash2, X, CheckCircle } from 'lucide-react';
 import SharedStyles from './SharedStyles.jsx';
 import { BAHT_SCHEME } from './klongRules.js';
+import { IRREGULAR_SYLLABLES } from './irregularSyllables.js';
 
 /**
  * Login-gated admin shell. Step 3 scaffold only — the actual admin screens
@@ -759,8 +760,212 @@ const PromptsPanel = () => {
   );
 };
 
+// --- Algorithm docs + comments ---
+// Prose summary of thaiSyllable.js/klongRules.js/klongValidator.js for an
+// admin audience (full detail lives in CLAUDE.md, for developers). The
+// irregular-syllable table below is NOT hardcoded — it imports
+// IRREGULAR_SYLLABLES from irregularSyllables.js directly, so it can never
+// drift out of sync with the actual dictionary the way a written-out list
+// would. Important scope note, also stated in the UI: irregularSyllables.js
+// is source code imported by thaiSyllable.js, not a database table —
+// nothing on this page can edit it live. The comment box below lets an
+// admin flag a word the scanner still gets wrong; a developer (or Claude)
+// still applies the fix as an actual code change with tests, same as every
+// entry already in the dictionary was added.
+
+const CommentForm = ({ onAdded }) => {
+  const [body, setBody] = useState('');
+  const [linked, setLinked] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async () => {
+    const text = body.trim();
+    if (!text) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/algorithm-comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: text, linked_irregular_syllable: linked.trim() || null }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'บันทึกไม่สำเร็จ');
+      setBody('');
+      setLinked('');
+      onAdded();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="card-pixel p-4 space-y-2" style={{ backgroundColor: 'var(--c-cream)' }}>
+      <textarea
+        className="input-pixel w-full px-3 py-2 h-20 resize-none text-sm"
+        placeholder="รายงานคำที่ scanner ยังตรวจผิด หรือข้อเสนอแนะเกี่ยวกับ algorithm"
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+      />
+      <input
+        className="input-pixel w-full px-3 py-2 text-sm"
+        placeholder="คำที่เกี่ยวข้อง (ถ้ามี) — เช่น ฤกษ์"
+        value={linked}
+        onChange={(e) => setLinked(e.target.value)}
+      />
+      {error && (
+        <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--c-brick)' }}>
+          <AlertCircle className="w-3 h-3 flex-shrink-0" /> {error}
+        </div>
+      )}
+      <button onClick={submit} className="btn-pixel btn-primary px-3 py-1.5 text-sm" disabled={submitting}>
+        {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'ส่งความเห็น'}
+      </button>
+    </div>
+  );
+};
+
+const CommentRow = ({ comment, onChanged }) => {
+  const [busy, setBusy] = useState(false);
+
+  const toggleStatus = async () => {
+    setBusy(true);
+    try {
+      await fetch('/api/admin/algorithm-comments', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: comment.id, status: comment.status === 'open' ? 'resolved' : 'open' }),
+      });
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!confirm('ลบความเห็นนี้ถาวร?')) return;
+    await fetch('/api/admin/algorithm-comments', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: comment.id }),
+    });
+    onChanged();
+  };
+
+  return (
+    <div className="card-pixel p-3 space-y-1">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm flex-1" style={{ color: 'var(--c-charcoal)' }}>{comment.body}</p>
+        <span
+          className="badge-pixel px-2 py-0.5 text-xs flex-shrink-0"
+          style={{ backgroundColor: comment.status === 'resolved' ? 'var(--c-sage-light)' : 'var(--c-gold)' }}
+        >
+          {comment.status === 'resolved' ? 'แก้แล้ว' : 'ยังเปิดอยู่'}
+        </span>
+      </div>
+      {comment.linked_irregular_syllable && (
+        <p className="text-xs" style={{ color: 'var(--c-sage-dark)' }}>
+          คำที่เกี่ยวข้อง: <code>{comment.linked_irregular_syllable}</code>
+        </p>
+      )}
+      <div className="flex items-center justify-between text-xs" style={{ color: 'var(--c-sage-dark)' }}>
+        <span>{comment.admin_username} · {new Date(comment.created_at).toLocaleString('th-TH')}</span>
+        <div className="flex gap-2">
+          <button onClick={toggleStatus} className="btn-pixel btn-secondary px-2 py-1 text-xs" disabled={busy}>
+            <CheckCircle className="w-3 h-3" /> {comment.status === 'open' ? 'ทำเครื่องหมายว่าแก้แล้ว' : 'เปิดใหม่'}
+          </button>
+          <button onClick={remove} className="btn-pixel btn-danger px-2 py-1 text-xs"><Trash2 className="w-3 h-3" /></button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AlgorithmDocsPanel = () => {
+  const [comments, setComments] = useState(null);
+  const [error, setError] = useState('');
+
+  const load = () => {
+    fetch('/api/admin/algorithm-comments')
+      .then((res) => res.json())
+      .then(setComments)
+      .catch(() => setError('โหลดความเห็นไม่สำเร็จ'));
+  };
+
+  useEffect(load, []);
+
+  const irregularEntries = Object.entries(IRREGULAR_SYLLABLES);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-heading text-lg font-bold mb-2" style={{ color: 'var(--c-charcoal)' }}>เอกสาร Algorithm</h2>
+        <div className="text-sm space-y-2" style={{ color: 'var(--c-charcoal)' }}>
+          <p><strong>ตัวตรวจฉันทลักษณ์ (klongValidator.js)</strong> ตรวจ 3 อย่าง: โครงสร้าง (จำนวนคำต่อบาท, klongRules.js), เอก/โท (ตำแหน่งบังคับ), และสัมผัสสระระหว่างบาท — เป็นกฎตายตัว (deterministic) AI ไม่มีสิทธิ์ override</p>
+          <p><strong>ตัวตัดพยางค์ (thaiSyllable.js)</strong> เป็น scanner เขียนมือ ไม่ใช่ regex เดียว เพราะภาษาไทยกำกวมเกินกว่า regex ทั่วไปจะตัดถูกทุกกรณี</p>
+          <p><strong>เอกโทษ/โทโทษ</strong> เปิด/ปิดได้ที่แท็บ "ตั้งค่า" — อนุญาตสลับไม้เอก/ไม้โทในตำแหน่งบังคับ ตรวจแค่ระดับตัวอักษร ไม่ได้ตรวจว่า "ไม่มีคำที่สะกดถูกจริง" ตามกฎดั้งเดิม (ต้องใช้ความรู้เชิงศัพท์ที่เช็คจากตัวอักษรอย่างเดียวไม่ได้)</p>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="font-heading font-bold mb-1" style={{ color: 'var(--c-charcoal)' }}>Dictionary คำยกเว้น (irregularSyllables.js)</h3>
+        <p className="text-xs mb-2" style={{ color: 'var(--c-sage-dark)' }}>
+          ตารางนี้ดึงจากไฟล์จริงสด — ไม่ใช่ข้อความ hardcode จะไม่มีวันไม่ตรงกับ dictionary จริง แต่ <strong>แก้ไม่ได้จากหน้านี้</strong> เพราะเป็นซอร์สโค้ด ไม่ใช่ตาราง DB ใช้ฟอร์มด้านล่างเพื่อรายงานคำที่ยังพัง แล้วให้ผู้พัฒนาต่อ dictionary เป็นโค้ดจริงทีหลัง (ตามกระบวนการ TDD เดียวกับที่ใช้เพิ่มคำในตารางนี้ทุกคำ)
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" style={{ color: 'var(--c-charcoal)' }}>
+            <thead>
+              <tr className="text-left border-b-2" style={{ borderColor: 'var(--c-charcoal)' }}>
+                <th className="py-1 pr-4">คำ</th>
+                <th className="py-1">ลักษณะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {irregularEntries.map(([word, override]) => (
+                <tr key={word} className="border-b" style={{ borderColor: 'var(--c-sage-light)' }}>
+                  <td className="py-1 pr-4"><code>{word}</code></td>
+                  <td className="py-1 text-xs" style={{ color: 'var(--c-sage-dark)' }}>
+                    {override
+                      ? `vowelSkeleton: ${JSON.stringify(override.vowelSkeleton)}, final: ${override.finalConsonant ?? '-'} (${override.finalClass})`
+                      : 'แค่แก้ split เท่านั้น (analyzeSyllable ใช้ path ปกติ)'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="font-heading font-bold mb-2" style={{ color: 'var(--c-charcoal)' }}>ความเห็น / รายงานบั๊ก</h3>
+        <CommentForm onAdded={load} />
+        {error && <p className="text-sm mt-2" style={{ color: 'var(--c-brick)' }}>{error}</p>}
+        <div className="space-y-2 mt-3">
+          {comments === null ? (
+            <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--c-sage)' }} />
+          ) : comments.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--c-sage-dark)' }}>ยังไม่มีความเห็น</p>
+          ) : (
+            comments.map((c) => <CommentRow key={c.id} comment={c} onChanged={load} />)
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ADMIN_TABS = [
+  { id: 'settings', label: 'ตั้งค่า' },
+  { id: 'challenges', label: 'ด่านท้าทาย' },
+  { id: 'prompts', label: 'คลังโจทย์' },
+  { id: 'docs', label: 'เอกสาร Algorithm' },
+];
+
 const AdminDashboard = ({ username, onLoggedOut }) => {
   const [loggingOut, setLoggingOut] = useState(false);
+  const [activeTab, setActiveTab] = useState('settings');
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -774,29 +979,46 @@ const AdminDashboard = ({ username, onLoggedOut }) => {
 
   return (
     <div className="min-h-screen font-body" style={{ backgroundColor: 'var(--c-cream)' }}>
-      <header className="card-pixel m-4 p-4 flex items-center justify-between">
-        <h1 className="font-heading text-xl font-bold" style={{ color: 'var(--c-charcoal)' }}>Kawi AI — แผงควบคุมแอดมิน</h1>
-        <div className="flex items-center gap-4">
-          <span style={{ color: 'var(--c-charcoal)' }}>{username}</span>
-          <button onClick={handleLogout} className="btn-pixel btn-secondary px-3 py-1.5 text-sm" disabled={loggingOut}>
-            <LogOut className="w-4 h-4" /> ออกจากระบบ
-          </button>
+      <header className="card-pixel m-4 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="font-heading text-xl font-bold" style={{ color: 'var(--c-charcoal)' }}>Kawi AI — แผงควบคุมแอดมิน</h1>
+          <div className="flex items-center gap-4">
+            <span style={{ color: 'var(--c-charcoal)' }}>{username}</span>
+            <button onClick={handleLogout} className="btn-pixel btn-secondary px-3 py-1.5 text-sm" disabled={loggingOut}>
+              <LogOut className="w-4 h-4" /> ออกจากระบบ
+            </button>
+          </div>
+        </div>
+        <div role="tablist" aria-label="ส่วนต่างๆ ของแผงควบคุม" className="flex gap-2 flex-wrap">
+          {ADMIN_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`btn-pixel px-3 py-1.5 text-sm ${activeTab === tab.id ? 'btn-primary' : 'btn-secondary'}`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </header>
-      <main className="m-4 card-pixel p-8 space-y-8" style={{ color: 'var(--c-charcoal)' }}>
-        <AiSettingsPanel />
-        <div style={{ borderTop: '2px solid var(--c-charcoal)', paddingTop: '2rem' }}>
-          <ValidatorSettingsPanel />
+      <main className="m-4 card-pixel p-8" style={{ color: 'var(--c-charcoal)' }}>
+        <div role="tabpanel" hidden={activeTab !== 'settings'} className="space-y-8">
+          <AiSettingsPanel />
+          <div style={{ borderTop: '2px solid var(--c-charcoal)', paddingTop: '2rem' }}>
+            <ValidatorSettingsPanel />
+          </div>
         </div>
-        <div style={{ borderTop: '2px solid var(--c-charcoal)', paddingTop: '2rem' }}>
+        <div role="tabpanel" hidden={activeTab !== 'challenges'}>
           <ChallengesPanel />
         </div>
-        <div style={{ borderTop: '2px solid var(--c-charcoal)', paddingTop: '2rem' }}>
+        <div role="tabpanel" hidden={activeTab !== 'prompts'}>
           <PromptsPanel />
         </div>
-        <p className="text-xs pt-4" style={{ color: 'var(--c-sage-dark)', borderTop: '2px solid var(--c-charcoal)' }}>
-          เอกสาร Algorithm — จะมาในขั้นถัดไป
-        </p>
+        <div role="tabpanel" hidden={activeTab !== 'docs'}>
+          <AlgorithmDocsPanel />
+        </div>
       </main>
     </div>
   );
