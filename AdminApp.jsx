@@ -154,16 +154,18 @@ const AiSettingsPanel = () => {
 
       <div>
         <label className="block text-sm mb-1" style={{ color: 'var(--c-charcoal)' }}>
-          Prompt override (ใส่ {'{topic}'} แทนหัวข้อ — เว้นว่างไว้เพื่อใช้ค่าเริ่มต้น)
+          Prompt ที่จะส่งไปสร้างโคลง (เว้นว่างไว้เพื่อใช้ค่าเริ่มต้น)
         </label>
         <textarea
-          className="input-pixel w-full px-3 py-2 h-28 resize-none font-mono text-sm"
+          className="input-pixel w-full px-3 py-2 h-64 resize-y font-mono text-sm"
           value={settings.prompt_template ?? ''}
           onChange={(e) => setSettings({ ...settings, prompt_template: e.target.value })}
-          placeholder='เช่น: เขียนโคลงสี่สุภาพแนวขำขันเกี่ยวกับ "{topic}"'
+          placeholder={'ทำหน้าที่เป็นกวีเอก...\nจงแต่งโคลงสี่สุภาพ 1 บท (4 บาท) ในหัวข้อ: "{topic}"\n\nโครงสร้างฉันทลักษณ์:\n{scheme}\n\nสัมผัสบังคับ:\n{rhyme}'}
         />
-        <p className="text-xs mt-1" style={{ color: 'var(--c-sage-dark)' }}>
-          กฎฉันทลักษณ์ (จำนวนคำ, เอก-โท, สัมผัส) มาจาก klongRules.js เสมอ ไม่ว่า prompt นี้จะเขียนว่าอย่างไร
+        <p className="text-xs mt-1 space-y-0.5" style={{ color: 'var(--c-sage-dark)' }}>
+          <span className="block">นี่คือ prompt เต็มที่ส่งให้ AI จริงๆ แก้ถ้อยคำ/ลำดับ/เนื้อหาได้อิสระ — <strong>ต้องมี {'{topic}'}</strong> ไม่งั้นระบบจะใช้ค่าเริ่มต้นแทนทั้งหมด (AI จะไม่รู้หัวข้อที่ผู้ใช้พิมพ์)</span>
+          <span className="block">ใส่ {'{scheme}'} / {'{rhyme}'} เพื่อแทรกกฎโครงสร้าง/สัมผัสที่ดึงสดจาก klongRules.js — ถ้าไม่ใส่ AI จะไม่เห็นกฎเหล่านี้เลย (คะแนนตรวจฉันทลักษณ์อาจต่ำลง แต่ระบบยังตรวจจริงเหมือนเดิมเสมอ ไม่ว่า prompt จะเขียนว่าอย่างไร)</span>
+          <span className="block">คำสั่งให้ตอบเป็น JSON ท้าย prompt ถูกเติมให้อัตโนมัติเสมอ แก้ไม่ได้ เพราะระบบต้อง parse คำตอบเป็น JSON ไม่งั้นจะสร้างโคลงไม่สำเร็จเลย</span>
         </p>
       </div>
 
@@ -956,11 +958,166 @@ const AlgorithmDocsPanel = () => {
   );
 };
 
+// --- Admin account CRUD ---
+
+const AccountForm = ({ initial, onCancel, onSave, saving, error }) => {
+  const [username, setUsername] = useState(initial.username);
+  const [password, setPassword] = useState('');
+
+  return (
+    <div className="card-pixel p-4 space-y-3" style={{ backgroundColor: 'var(--c-cream)' }}>
+      <div>
+        <label className="block text-sm mb-1" style={{ color: 'var(--c-charcoal)' }}>ชื่อผู้ใช้</label>
+        <input className="input-pixel w-full px-3 py-2" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
+      </div>
+      <div>
+        <label className="block text-sm mb-1" style={{ color: 'var(--c-charcoal)' }}>
+          รหัสผ่าน{initial.id && ' (เว้นว่างไว้ถ้าไม่ต้องการเปลี่ยน)'}
+        </label>
+        <input className="input-pixel w-full px-3 py-2" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+      </div>
+      {error && (
+        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--c-brick)' }}>
+          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+        </div>
+      )}
+      <div className="flex gap-3">
+        <button
+          onClick={() => onSave({ username: username.trim(), password })}
+          className="btn-pixel btn-primary px-4 py-2 text-sm"
+          disabled={saving}
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'บันทึก'}
+        </button>
+        <button onClick={onCancel} className="btn-pixel btn-secondary px-4 py-2 text-sm" disabled={saving}>
+          <X className="w-4 h-4" /> ยกเลิก
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const AccountsPanel = ({ currentUsername }) => {
+  const [accounts, setAccounts] = useState(null);
+  const [editingId, setEditingId] = useState(null); // null | 'new' | an account id
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = () => {
+    fetch('/api/admin/accounts')
+      .then((res) => res.json())
+      .then(setAccounts)
+      .catch(() => setError('โหลดรายชื่อแอดมินไม่สำเร็จ'));
+  };
+
+  useEffect(load, []);
+
+  const handleSave = async ({ username, password }) => {
+    if (!username) {
+      setError('ต้องระบุชื่อผู้ใช้');
+      return;
+    }
+    if (editingId === 'new' && !password) {
+      setError('ต้องระบุรหัสผ่านสำหรับบัญชีใหม่');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/accounts', {
+        method: editingId === 'new' ? 'POST' : 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingId === 'new' ? { username, password } : { id: editingId, username, password: password || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'บันทึกไม่สำเร็จ');
+      setEditingId(null);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id, accountUsername) => {
+    if (!confirm(`ลบบัญชี "${accountUsername}" ถาวร?`)) return;
+    setError('');
+    try {
+      const res = await fetch('/api/admin/accounts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ลบไม่สำเร็จ');
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-heading text-lg font-bold" style={{ color: 'var(--c-charcoal)' }}>บัญชีแอดมิน</h2>
+        {editingId === null && (
+          <button onClick={() => setEditingId('new')} className="btn-pixel btn-primary px-3 py-1.5 text-sm">
+            <Plus className="w-4 h-4" /> เพิ่มบัญชี
+          </button>
+        )}
+      </div>
+
+      {error && editingId === null && (
+        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--c-brick)' }}>
+          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+        </div>
+      )}
+
+      {editingId === 'new' && (
+        <AccountForm initial={{ username: '' }} onCancel={() => setEditingId(null)} onSave={handleSave} saving={saving} error={error} />
+      )}
+
+      {accounts === null ? (
+        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--c-sage)' }} />
+      ) : (
+        <div className="space-y-2">
+          {accounts.map((a) => (
+            editingId === a.id ? (
+              <AccountForm key={a.id} initial={a} onCancel={() => setEditingId(null)} onSave={handleSave} saving={saving} error={error} />
+            ) : (
+              <div key={a.id} className="card-pixel p-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-bold" style={{ color: 'var(--c-charcoal)' }}>
+                    {a.username} {a.username === currentUsername && <span className="text-xs font-normal">(บัญชีนี้)</span>}
+                  </p>
+                  <p className="text-xs" style={{ color: 'var(--c-sage-dark)' }}>
+                    สร้างเมื่อ {new Date(a.created_at).toLocaleDateString('th-TH')}
+                  </p>
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button onClick={() => setEditingId(a.id)} className="btn-pixel btn-secondary px-3 py-1.5 text-sm">
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => handleDelete(a.id, a.username)} className="btn-pixel btn-danger px-3 py-1.5 text-sm">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ADMIN_TABS = [
   { id: 'settings', label: 'ตั้งค่า' },
   { id: 'challenges', label: 'ด่านท้าทาย' },
   { id: 'prompts', label: 'คลังโจทย์' },
   { id: 'docs', label: 'เอกสาร Algorithm' },
+  { id: 'accounts', label: 'บัญชีแอดมิน' },
 ];
 
 const AdminDashboard = ({ username, onLoggedOut }) => {
@@ -1018,6 +1175,9 @@ const AdminDashboard = ({ username, onLoggedOut }) => {
         </div>
         <div role="tabpanel" hidden={activeTab !== 'docs'}>
           <AlgorithmDocsPanel />
+        </div>
+        <div role="tabpanel" hidden={activeTab !== 'accounts'}>
+          <AccountsPanel currentUsername={username} />
         </div>
       </main>
     </div>

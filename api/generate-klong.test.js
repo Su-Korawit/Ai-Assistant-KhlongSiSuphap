@@ -47,7 +47,7 @@ describe('generateKlong — minimum score threshold', () => {
   });
 });
 
-describe('generateKlong — admin prompt_template override', () => {
+describe('generateKlong — admin prompt_template override (full prompt, not just the intro)', () => {
   let fetchMock;
   beforeEach(() => {
     fetchMock = vi.fn(async () => mockGeminiResponse(LOW_SCORE_BAHT));
@@ -62,25 +62,49 @@ describe('generateKlong — admin prompt_template override', () => {
     expect(promptText).toContain('เขียนโคลงสนุกๆ เกี่ยวกับ ฤดูฝน หน่อย');
   });
 
-  it('falls back to the default intro when no template is given', async () => {
+  it('falls back to the default template when none is given', async () => {
     await generateKlong('ฤดูฝน', 'fake-api-key');
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     const promptText = sentBody.contents[0].parts[0].text;
     expect(promptText).toContain('ทำหน้าที่เป็นกวีเอก');
   });
 
-  it('falls back to the default intro when the template has no {topic} placeholder', async () => {
+  it('falls back to the default template when the custom one has no {topic} placeholder', async () => {
     await generateKlong('ฤดูฝน', 'fake-api-key', 'พรอมต์ที่ไม่มี placeholder เลย');
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     const promptText = sentBody.contents[0].parts[0].text;
     expect(promptText).toContain('ทำหน้าที่เป็นกวีเอก');
   });
 
-  it('never drops the structural scheme instructions, even with a custom template', async () => {
-    await generateKlong('ฤดูฝน', 'fake-api-key', 'เขียนโคลงเกี่ยวกับ {topic}');
+  it('a custom template using {scheme}/{rhyme} gets the live klongRules.js-derived text substituted in', async () => {
+    await generateKlong('ฤดูฝน', 'fake-api-key', 'แต่งโคลงเรื่อง {topic}\n\nกฎ:\n{scheme}\n\nสัมผัส:\n{rhyme}');
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     const promptText = sentBody.contents[0].parts[0].text;
-    expect(promptText).toContain('โครงสร้างฉันทลักษณ์ที่ต้องปฏิบัติตามอย่างเคร่งครัด');
+    expect(promptText).toContain('บาทที่ 1: 7 คำ');
+    expect(promptText).toContain('บาท1 คำ7');
+  });
+
+  it('a custom template that omits {scheme} genuinely omits it — full admin control, not forced back in', async () => {
+    await generateKlong('ฤดูฝน', 'fake-api-key', 'แต่งโคลงสั้นๆ เกี่ยวกับ {topic}');
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const promptText = sentBody.contents[0].parts[0].text;
+    expect(promptText).not.toContain('โครงสร้างฉันทลักษณ์ที่ต้องปฏิบัติตามอย่างเคร่งครัด');
+  });
+
+  it('always appends the JSON-output-format footer regardless of the template — required for the app to parse the response at all, not admin-editable content', async () => {
+    await generateKlong('ฤดูฝน', 'fake-api-key', 'แต่งโคลงสั้นๆ เกี่ยวกับ {topic}');
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const promptText = sentBody.contents[0].parts[0].text;
+    expect(promptText).toContain('ตอบกลับเป็น JSON เท่านั้น');
+    expect(promptText).toContain('"baht"');
+  });
+
+  it('the JSON footer\'s example rows always match BAHT_SCHEME\'s real word counts, not stale hardcoded literals', async () => {
+    await generateKlong('ฤดูฝน', 'fake-api-key');
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const promptText = sentBody.contents[0].parts[0].text;
+    // บาทที่ 4 has 9 words per BAHT_SCHEME — the example row must show 9, not a stale count.
+    expect(promptText).toContain('"คำ9"');
   });
 });
 

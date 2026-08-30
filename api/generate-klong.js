@@ -29,44 +29,56 @@ function buildRhymeDescription() {
   ).join('\n');
 }
 
-const DEFAULT_INTRO = (topic) => `ทำหน้าที่เป็นกวีเอกผู้เชี่ยวชาญด้านภาษาไทยและฉันทลักษณ์โคลงสี่สุภาพ
-จงแต่งโคลงสี่สุภาพ 1 บท (4 บาท) ในหัวข้อ: "${topic}"`;
-
-// Admin-editable via ai_settings.prompt_template (api/admin/ai-settings.js).
-// Only the intro/persona line is overridable — the structural scheme
-// (below) always comes from klongRules.js regardless, since that's the
-// single source of truth the deterministic validateKlong checks against
-// (CLAUDE.md's "Pure logic modules" rule); letting a free-text admin
-// prompt override it would let the AI and the validator disagree about
-// what "correct" means.
-function buildIntro(topic, promptTemplate) {
-  if (promptTemplate && promptTemplate.includes('{topic}')) {
-    return promptTemplate.replaceAll('{topic}', topic);
-  }
-  return DEFAULT_INTRO(topic);
+function buildJsonFormatBlock() {
+  const exampleRows = BAHT_SCHEME
+    .map((b) => '[' + Array.from({ length: b.wordCount }, (_, i) => `"คำ${i + 1}"`).join(',') + ']')
+    .join(',\n    ');
+  return `ตอบกลับเป็น JSON เท่านั้น ห้ามมีข้อความอธิบายหรือ Markdown โดยให้ "baht" เป็นอาร์เรย์ 4 แถว
+แต่ละแถวเป็นอาร์เรย์ของคำ โดยแต่ละช่องมี "คำเดียว" (หนึ่งพยางค์) เท่านั้น ตรงตามจำนวนคำของบาทนั้น:
+{
+  "baht": [
+    ${exampleRows}
+  ]
+}`;
 }
 
-function buildPrompt(topic, promptTemplate) {
-  return `${buildIntro(topic, promptTemplate)}
+const DEFAULT_PROMPT_TEMPLATE = `ทำหน้าที่เป็นกวีเอกผู้เชี่ยวชาญด้านภาษาไทยและฉันทลักษณ์โคลงสี่สุภาพ
+จงแต่งโคลงสี่สุภาพ 1 บท (4 บาท) ในหัวข้อ: "{topic}"
 
 โครงสร้างฉันทลักษณ์ที่ต้องปฏิบัติตามอย่างเคร่งครัด (นับพยางค์ที่ออกเสียงจริง ไม่ใช่จำนวนคำเขียน):
-${buildSchemeDescription()}
+{scheme}
 
 (อนุญาตให้ใช้ "คำตาย" แทนคำเอกได้)
 
 สัมผัสบังคับระหว่างบาท (คำต้องคล้องจองสระกัน):
-${buildRhymeDescription()}
+{rhyme}`;
 
-ตอบกลับเป็น JSON เท่านั้น ห้ามมีข้อความอธิบายหรือ Markdown โดยให้ "baht" เป็นอาร์เรย์ 4 แถว
-แต่ละแถวเป็นอาร์เรย์ของคำ โดยแต่ละช่องมี "คำเดียว" (หนึ่งพยางค์) เท่านั้น ตรงตามจำนวนคำของบาทนั้น:
-{
-  "baht": [
-    ["คำ1","คำ2","คำ3","คำ4","คำ5","คำ6","คำ7"],
-    ["คำ1","คำ2","คำ3","คำ4","คำ5","คำ6","คำ7"],
-    ["คำ1","คำ2","คำ3","คำ4","คำ5","คำ6","คำ7"],
-    ["คำ1","คำ2","คำ3","คำ4","คำ5","คำ6","คำ7","คำ8","คำ9"]
-  ]
-}`;
+// Admin-editable via ai_settings.prompt_template (AdminApp.jsx's AI
+// settings panel) — the whole generation prompt is theirs to rewrite, not
+// just an intro line: wording, ordering, whether to even mention the
+// scheme/rhyme rules. {topic}/{scheme}/{rhyme} are substituted with the
+// live topic and klongRules.js-derived text so a custom template never
+// goes stale even if BAHT_SCHEME/RHYME_GROUPS change later. Falls back to
+// the default template when unset or missing {topic} — otherwise the
+// model would never learn what subject to write about.
+//
+// The JSON-output-format footer is NOT part of the editable template and
+// is always appended after it. That's not a structural-correctness rule
+// like scheme/rhyme (those are now genuinely admin-omittable — validateKlong
+// still grades the result deterministically either way, so dropping them
+// just risks a worse-scoring draft, not a broken one). Requiring literal
+// JSON output is a technical protocol requirement of this app's parsing
+// step (callGemini's JSON.parse) — dropping it would hard-fail every
+// generation, not just produce weaker poetry.
+function buildPrompt(topic, promptTemplate) {
+  const template = (promptTemplate && promptTemplate.includes('{topic}')) ? promptTemplate : DEFAULT_PROMPT_TEMPLATE;
+  const body = template
+    .replaceAll('{topic}', topic)
+    .replaceAll('{scheme}', buildSchemeDescription())
+    .replaceAll('{rhyme}', buildRhymeDescription());
+  return `${body}
+
+${buildJsonFormatBlock()}`;
 }
 
 function buildRefinePrompt(topic, previousBaht, errors, promptTemplate) {
@@ -148,9 +160,9 @@ async function readJsonBody(req) {
  * up to MAX_REFINE_ATTEMPTS. Always returns the best-scoring attempt seen,
  * never loops unbounded (Section 15).
  *
- * `promptTemplate` is the admin-editable intro override (ai_settings table,
- * see buildIntro's comment) — optional, falls back to the default persona
- * intro when omitted or missing a {topic} placeholder.
+ * `promptTemplate` is the admin-editable full prompt (ai_settings table,
+ * see buildPrompt's comment) — optional, falls back to the default
+ * template when omitted or missing a {topic} placeholder.
  *
  * `allowTonePenalty` (validator_settings table) is forwarded to
  * validateKlong as-is — see its own doc comment (เอกโทษ/โทโทษ). Applying it
