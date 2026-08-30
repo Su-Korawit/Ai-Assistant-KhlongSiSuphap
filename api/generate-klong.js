@@ -1,6 +1,7 @@
 import { validateKlong } from '../klongValidator.js';
 import { BAHT_SCHEME, RHYME_GROUPS, MIN_ACCEPTABLE_SCORE } from '../klongRules.js';
 import { sql } from '../db/client.js';
+import { DEFAULT_PROMPT_TEMPLATE } from '../promptTemplate.js';
 
 // Written against raw Node http req/res (not Vercel-specific helpers) so the
 // exact same handler runs under Vercel's Node runtime in production AND
@@ -41,17 +42,6 @@ function buildJsonFormatBlock() {
   ]
 }`;
 }
-
-const DEFAULT_PROMPT_TEMPLATE = `ทำหน้าที่เป็นกวีเอกผู้เชี่ยวชาญด้านภาษาไทยและฉันทลักษณ์โคลงสี่สุภาพ
-จงแต่งโคลงสี่สุภาพ 1 บท (4 บาท) ในหัวข้อ: "{topic}"
-
-โครงสร้างฉันทลักษณ์ที่ต้องปฏิบัติตามอย่างเคร่งครัด (นับพยางค์ที่ออกเสียงจริง ไม่ใช่จำนวนคำเขียน):
-{scheme}
-
-(อนุญาตให้ใช้ "คำตาย" แทนคำเอกได้)
-
-สัมผัสบังคับระหว่างบาท (คำต้องคล้องจองสระกัน):
-{rhyme}`;
 
 // Admin-editable via ai_settings.prompt_template (AdminApp.jsx's AI
 // settings panel) — the whole generation prompt is theirs to rewrite, not

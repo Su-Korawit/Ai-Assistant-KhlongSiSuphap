@@ -3,6 +3,7 @@ import { Lock, LogOut, Loader2, AlertCircle, CheckCircle2, Plus, Pencil, Trash2,
 import SharedStyles from './SharedStyles.jsx';
 import { BAHT_SCHEME } from './klongRules.js';
 import { IRREGULAR_SYLLABLES } from './irregularSyllables.js';
+import { DEFAULT_PROMPT_TEMPLATE } from './promptTemplate.js';
 
 /**
  * Login-gated admin shell. Step 3 scaffold only — the actual admin screens
@@ -105,7 +106,16 @@ const AiSettingsPanel = () => {
   useEffect(() => {
     fetch('/api/admin/ai-settings')
       .then((res) => res.json())
-      .then((data) => { setSettings(data); setLoading(false); })
+      .then((data) => {
+        // Materialize the real default into the editable field immediately —
+        // an admin should see and edit the prompt actually in use, not an
+        // empty box with just a placeholder example. Saving unedited still
+        // works exactly like before: {scheme}/{rhyme} stay unresolved
+        // placeholders in the stored text, substituted live at generation
+        // time, so this can never go stale even if BAHT_SCHEME changes later.
+        setSettings({ ...data, prompt_template: data.prompt_template || DEFAULT_PROMPT_TEMPLATE });
+        setLoading(false);
+      })
       .catch(() => { setError('โหลดการตั้งค่าไม่สำเร็จ'); setLoading(false); });
   }, []);
 
@@ -153,14 +163,22 @@ const AiSettingsPanel = () => {
       />
 
       <div>
-        <label className="block text-sm mb-1" style={{ color: 'var(--c-charcoal)' }}>
-          Prompt ที่จะส่งไปสร้างโคลง (เว้นว่างไว้เพื่อใช้ค่าเริ่มต้น)
-        </label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-sm" style={{ color: 'var(--c-charcoal)' }}>
+            Prompt ที่จะส่งไปสร้างโคลง — นี่คือ prompt จริงที่ระบบใช้อยู่ตอนนี้ แก้ได้โดยตรง
+          </label>
+          <button
+            type="button"
+            onClick={() => setSettings({ ...settings, prompt_template: DEFAULT_PROMPT_TEMPLATE })}
+            className="btn-pixel btn-secondary px-2 py-1 text-xs flex-shrink-0"
+          >
+            คืนค่าเริ่มต้น
+          </button>
+        </div>
         <textarea
           className="input-pixel w-full px-3 py-2 h-64 resize-y font-mono text-sm"
           value={settings.prompt_template ?? ''}
           onChange={(e) => setSettings({ ...settings, prompt_template: e.target.value })}
-          placeholder={'ทำหน้าที่เป็นกวีเอก...\nจงแต่งโคลงสี่สุภาพ 1 บท (4 บาท) ในหัวข้อ: "{topic}"\n\nโครงสร้างฉันทลักษณ์:\n{scheme}\n\nสัมผัสบังคับ:\n{rhyme}'}
         />
         <p className="text-xs mt-1 space-y-0.5" style={{ color: 'var(--c-sage-dark)' }}>
           <span className="block">นี่คือ prompt เต็มที่ส่งให้ AI จริงๆ แก้ถ้อยคำ/ลำดับ/เนื้อหาได้อิสระ — <strong>ต้องมี {'{topic}'}</strong> ไม่งั้นระบบจะใช้ค่าเริ่มต้นแทนทั้งหมด (AI จะไม่รู้หัวข้อที่ผู้ใช้พิมพ์)</span>
